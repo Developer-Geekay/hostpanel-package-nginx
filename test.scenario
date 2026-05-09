@@ -1,0 +1,164 @@
+# hostpanel-nginx — Test Scenarios
+
+## Prerequisites
+- Panel running on :2082, logged in as admin
+- At least one hosting user exists (e.g. `testuser`)
+- A DNS zone for `testdomain.com` exists in the DNS panel
+- `SERVER_IP` set in `.env` so A records are auto-created
+
+---
+
+## SCENARIO 1: Provision a website
+Steps:
+1. Navigate to Websites → "Add Website"
+2. Enter `testdomain.com` and select user `testuser`
+Expected:
+- Success; `testdomain.com` appears in list with status "active"
+- `/home/testuser/public_html/testdomain.com/index.html` exists on server
+- `/opt/hostpanel/nginx/vhosts/testdomain.com.conf` exists
+- `curl http://testdomain.com` returns the default "You're live!" page
+- DNS zone in DNS panel is NOT modified (nginx does not own DNS)
+
+## SCENARIO 2: Add a subdomain
+Steps:
+1. Websites → click `testdomain.com` → "Add Subdomain"
+2. Enter `blog`
+Expected:
+- `blog.testdomain.com` appears in subdomains list
+- `/opt/hostpanel/nginx/vhosts/blog.testdomain.com.conf` exists
+- DNS A record `blog.testdomain.com → SERVER_IP` created (nginx creates A records for subdomains only)
+
+## SCENARIO 3: Issue SSL certificate
+Steps:
+1. Security → SSL → "Issue Certificate" → select `testdomain.com`
+Expected:
+- Status shows "pending" then polling resolves to "valid"
+- `/etc/letsencrypt/live/testdomain.com/` exists on server
+
+## SCENARIO 4: Enable Force HTTPS
+Steps:
+1. SSL page → toggle "Force HTTPS" for `testdomain.com`
+Expected:
+- `curl -I http://testdomain.com` returns 301 → `https://testdomain.com`
+- Vhost file contains `return 301 https://`
+
+## SCENARIO 5: Add a redirect
+Steps:
+1. Navigate to Websites → `testdomain.com` → Redirects → "Add Redirect"
+2. Source path: `/old-page`, Destination: `https://testdomain.com/new-page`, Type: 301
+Expected:
+- `curl -I http://testdomain.com/old-page` returns 301 → destination URL
+- Nginx vhost config contains the location block
+
+## SCENARIO 6: Delete a subdomain
+Steps:
+1. Websites → `testdomain.com` → delete `blog.testdomain.com`
+Expected:
+- Vhost file removed; nginx reloaded
+- DNS A record for `blog.testdomain.com` removed from DNS panel
+- Files in `/home/testuser/public_html/blog.testdomain.com/` preserved
+
+## SCENARIO 7: Delete a website — nginx-only cleanup
+Steps:
+1. Websites → `testdomain.com` → Delete
+Expected:
+- Nginx vhost removed and nginx reloaded
+- SSL cert deleted (certbot delete)
+- Subdomain vhosts cleaned up
+- DNS zone `testdomain.com` is PRESERVED in DNS panel (nginx does not own DNS)
+- FTP account, databases, and system user are PRESERVED (belong to other modules/core)
+- Entry removed from `domains.json`
+
+## SCENARIO 8: Delete DNS zone with associated website (cascade via hook)
+Steps:
+1. DNS panel → delete zone `testdomain.com` (domain must be provisioned in Websites)
+Expected:
+- Zone deleted from PowerDNS
+- `hostpanel.hooks.domain_delete` hook fires → nginx plugin cleans up vhost and SSL
+- Domain entry removed from `domains.json`
+- FTP, databases, system user PRESERVED
+
+## SCENARIO 9: Delete a hosting user (full cascade via core)
+Steps:
+1. Users → delete `testuser` (who has domains, SSL certs, subdomains)
+Expected:
+- Nginx vhosts for user's domains removed
+- SSL certs deleted via certbot
+- Subdomain vhosts removed
+- DNS zones PRESERVED in DNS panel (DNS is core, user delete doesn't touch it)
+- System user deleted by core (not nginx plugin)
+
+---
+
+## SCENARIO 10: Install nginx plugin when domains.json already has entries
+Precondition: domains.json has existing records (e.g. from a previous install) but vhosts are missing
+Steps:
+1. Upload and install `hostpanel-nginx-1.0.0.zip`
+2. Server restarts
+3. Navigate to Websites
+Expected:
+- `on_startup` hook fires on restart
+- Vhost files created for all domains in domains.json that were missing vhosts
+- Existing vhost files are NOT overwritten (skip_if_exists=True)
+- Confirmation: `ls /opt/hostpanel/nginx/vhosts/` shows vhosts for all registered domains
+
+## SCENARIO 11: Install nginx plugin — does NOT overwrite existing nginx configs
+Precondition: A vhost file already exists for `testdomain.com` with custom configuration
+Steps:
+1. Install/reinstall the nginx plugin
+2. Server restarts
+Expected:
+- Existing vhost file for `testdomain.com` is unchanged (skip_if_exists=True in on_startup)
+- `diff` between old and new vhost shows no changes
+
+## SCENARIO 12: Uninstall nginx plugin (blocked without force)
+Steps:
+1. Packages → uninstall `hostpanel-nginx` (no force, domains exist)
+Expected:
+- 409 error: "Cannot uninstall: N domain(s) still provisioned. Use force=True to remove them."
+- No vhosts deleted; server unchanged
+
+## SCENARIO 13: Uninstall nginx plugin with force — DNS zones preserved
+Steps:
+1. Packages → uninstall `hostpanel-nginx` with force=true
+Expected:
+- All nginx vhost files deleted from `/opt/hostpanel/nginx/vhosts/`
+- All SSL certs deleted via certbot
+- Nginx reloaded (graceful)
+- DNS zones in DNS panel PRESERVED — verify via DNS panel or `pdns_control list-zones`
+- FTP accounts, databases, and system users PRESERVED
+- domains.json and subdomains.json cleared
+- Server restarts; "Websites" nav item disappears from sidebar
+- SSL nav item remains (SSL is core)
+
+---
+
+## SCENARIO 14: Package compatibility check — compatible version
+Steps:
+1. Install a package with `"requires_core": [1, 0, 0]` against core 1.0.0
+Expected:
+- Package loads successfully
+- `GET /cpanelapi/packages/installed` shows `"compatible": true`
+
+## SCENARIO 15: Package compatibility check — incompatible version
+Steps:
+1. Build a test package with `"requires_core": [2, 0, 0]` in PLUGIN_MANIFEST
+2. Install it against core 1.0.0
+Expected:
+- Package is installed by pip (pip doesn't know about hostpanel versions)
+- On server restart, core logs: "Plugin requires core >= [2,0,0], but core is (1,0,0). Skipping."
+- Plugin routers are NOT registered
+- Nav item does NOT appear in sidebar
+- `GET /cpanelapi/packages/installed` shows `"compatible": false`
+
+## SCENARIO 16: DNS entries present — nginx provisions vhosts on startup
+Steps:
+1. Uninstall nginx plugin (force)
+2. Using DNS panel, verify zones still exist for `testdomain.com`
+3. Manually re-add domain registry entry (or reinstall nginx and re-add domain)
+4. Reinstall nginx plugin
+5. Restart server
+Expected:
+- on_startup runs and creates vhosts for all domains in domains.json
+- Existing DNS zones are untouched
+- `curl http://testdomain.com` resolves to the provisioned site
