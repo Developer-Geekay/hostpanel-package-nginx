@@ -114,6 +114,9 @@ def _random_password(length: int = 16) -> str:
 
 
 def run_command_safe(command: List[str]):
+    # Insert -n after sudo so sudo-rs never prompts in non-TTY context
+    if command and command[0] == "sudo":
+        command = ["sudo", "-n"] + command[1:]
     try:
         subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.CalledProcessError as e:
@@ -298,7 +301,7 @@ async def cascade_delete_domain(domain_name: str) -> bool:
     if os.path.exists(f"/etc/letsencrypt/live/{domain_name}"):
         try:
             subprocess.run(
-                ["sudo", "certbot", "delete", "--cert-name", domain_name, "--non-interactive"],
+                ["sudo", "-n", "certbot", "delete", "--cert-name", domain_name, "--non-interactive"],
                 check=True, capture_output=True, text=True, timeout=30
             )
         except Exception as e:
@@ -357,7 +360,7 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
     run_command_safe(["sudo", "chmod", "777", document_root])
     try:
         subprocess.run(
-            ["sudo", "tee", os.path.join(document_root, "index.html")],
+            ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
             input=_default_index_html(domain), text=True, check=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -413,7 +416,7 @@ async def get_domain_resources(domain_name: str, current_user: User = Depends(re
     ftp_account = False
     try:
         result = subprocess.run(
-            ["sudo", PURE_PW, "list", "-f", PASSWD_FILE],
+            ["sudo", "-n", PURE_PW, "list", "-f", PASSWD_FILE],
             capture_output=True, text=True
         )
         ftp_account = username in {line.split()[0] for line in result.stdout.strip().splitlines() if line}
@@ -472,7 +475,7 @@ async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, _: Us
     run_command_safe(["sudo", "chmod", "777", document_root])
     try:
         subprocess.run(
-            ["sudo", "tee", os.path.join(document_root, "index.html")],
+            ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
             input=_default_index_html(fqdn), text=True, check=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
