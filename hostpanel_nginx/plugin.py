@@ -11,7 +11,14 @@ PLUGIN_MANIFEST = {
             "nav_section": "hosting",
             "admin_only": True,
         },
-    ]
+    ],
+    "service": {
+        "name": "nginx",
+        "unit": "hostpanel-nginx",
+        "label": "Web Server",
+        "icon": "public",
+        "can_reload": True,
+    },
 }
 
 routers = [domains_router, redirects_router]
