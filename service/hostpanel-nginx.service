@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=forking
-PIDFile=/opt/hostpanel/nginx/logs/nginx.pid
+PIDFile=/run/nginx.pid
 ExecStart=/opt/hostpanel/nginx/sbin/nginx
 ExecReload=/opt/hostpanel/nginx/sbin/nginx -s reload
 ExecStop=/opt/hostpanel/nginx/sbin/nginx -s stop
