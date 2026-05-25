@@ -5,11 +5,22 @@ PLUGIN_MANIFEST = {
     "requires_core": [1, 0, 0],
     "nav_items": [
         {
-            "nav_route": "domains",
-            "nav_label": "Websites",
-            "nav_icon": "language",
-            "nav_section": "hosting",
-            "admin_only": True,
+            "nav_route":         "domains",
+            "nav_label":         "Websites",
+            "nav_icon":          "language",
+            "nav_section":       "hosting",
+            "nav_section_label": "Hosting",
+            "nav_section_order": 10,
+            "admin_only":        True,
+        },
+        {
+            "nav_route":         "redirects",
+            "nav_label":         "Redirects",
+            "nav_icon":          "swap_horiz",
+            "nav_section":       "hosting",
+            "nav_section_label": "Hosting",
+            "nav_section_order": 10,
+            "admin_only":        True,
         },
     ],
     "service": {
