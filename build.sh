@@ -20,8 +20,9 @@ cp -r hostpanel_nginx setup.py plugin/
 zip -r "$OUT" \
     plugin/ \
     service/ \
-    sbin/ \
+    bin/ \
     conf/ \
+    sudoers/ \
     --exclude "**/__pycache__/*" --exclude "**/*.pyc"
 
 rm -rf plugin/

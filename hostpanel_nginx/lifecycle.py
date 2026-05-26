@@ -101,7 +101,9 @@ async def pre_uninstall(force: bool = False):
         subprocess.run(["sudo", "rm", "-rf", NGINX_DIR], capture_output=True)
         logger.info(f"Nginx pre_uninstall: removed {NGINX_DIR}")
 
-    logger.info("Nginx plugin uninstalled: vhosts, SSL certs, and binaries removed. DNS zones preserved.")
+    # Remove plugin sudoers last — all cleanup above still needs those permissions
+    subprocess.run(["sudo", "rm", "-f", "/etc/sudoers.d/hostpanel-nginx"], capture_output=True)
+    logger.info("Nginx plugin uninstalled: vhosts, SSL certs, binaries, and sudoers removed. DNS zones preserved.")
 
 
 async def on_startup():
