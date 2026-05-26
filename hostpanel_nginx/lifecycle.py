@@ -7,6 +7,30 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 LETSENCRYPT_DIR = "/etc/letsencrypt/live"
+SERVICE_NAME = "hostpanel-nginx"
+SERVICE_DST = f"/etc/systemd/system/{SERVICE_NAME}.service"
+NGINX_DIR = "/opt/hostpanel/nginx"
+
+
+def on_install():
+    """Install hostpanel-nginx service, enable, and start it."""
+    logger.info("Nginx on_install: setting up service")
+
+    if not os.path.exists(SERVICE_DST):
+        try:
+            import importlib.resources as pkg_res
+            svc_src = pkg_res.files("hostpanel_nginx").joinpath(f"{SERVICE_NAME}.service")
+            with pkg_res.as_file(svc_src) as p:
+                subprocess.run(["sudo", "cp", str(p), SERVICE_DST], check=True)
+                subprocess.run(["sudo", "chmod", "644", SERVICE_DST], check=True)
+                logger.info(f"Installed service file → {SERVICE_DST}")
+        except Exception as e:
+            logger.warning(f"Could not install bundled service file: {e}")
+
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
+    subprocess.run(["sudo", "systemctl", "enable", SERVICE_NAME], capture_output=True)
+    subprocess.run(["sudo", "systemctl", "start", SERVICE_NAME], capture_output=True)
+    logger.info("Nginx on_install: service enabled and started")
 
 
 async def pre_uninstall(force: bool = False):
@@ -22,6 +46,13 @@ async def pre_uninstall(force: bool = False):
             status_code=409,
             detail=f"Cannot uninstall: {len(domains)} domain(s) still provisioned. Use force=True to remove them."
         )
+
+    # Service is only stopped when uninstall will actually proceed
+    subprocess.run(["sudo", "systemctl", "stop", SERVICE_NAME], capture_output=True)
+    subprocess.run(["sudo", "systemctl", "disable", SERVICE_NAME], capture_output=True)
+    subprocess.run(["sudo", "rm", "-f", SERVICE_DST], capture_output=True)
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
+    logger.info(f"Nginx pre_uninstall: service stopped and removed")
     if domains and force:
         logger.info(f"Force-uninstalling nginx plugin: cleaning {len(domains)} domain(s) (vhosts + SSL only)")
         nginx_changed = False
@@ -65,14 +96,29 @@ async def pre_uninstall(force: bool = False):
         # Clear domain and subdomain registry (nginx owns these records)
         _save_domains([])
         _save_subdomains([])
-        logger.info("Nginx plugin uninstalled: all vhosts and SSL certs removed. DNS zones preserved.")
+
+    if force and os.path.isdir(NGINX_DIR):
+        subprocess.run(["sudo", "rm", "-rf", NGINX_DIR], capture_output=True)
+        logger.info(f"Nginx pre_uninstall: removed {NGINX_DIR}")
+
+    logger.info("Nginx plugin uninstalled: vhosts, SSL certs, and binaries removed. DNS zones preserved.")
 
 
 async def on_startup():
-    """Called at server startup. Provisions nginx vhosts for any domains in the
-    registry that don't already have a vhost config (e.g. after fresh nginx install)."""
+    """Called at server startup. Ensures nginx service is running and provisions
+    vhosts for any domains in the registry that don't already have a config."""
     from domain_registry import _load_domains, _load_subdomains
     from hostpanel_nginx.domains import write_nginx_vhost, VHOSTS_DIR
+
+    result = subprocess.run(
+        ["sudo", "systemctl", "is-active", SERVICE_NAME],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        logger.info(f"Nginx on_startup: service not active ({result.stdout.strip()}), starting...")
+        subprocess.run(["sudo", "systemctl", "start", SERVICE_NAME], capture_output=True)
+    else:
+        logger.info(f"Nginx on_startup: service is active")
 
     domains = _load_domains()
     if not domains:

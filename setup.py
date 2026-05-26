@@ -4,6 +4,7 @@ setup(
     name="hostpanel-nginx",
     version="1.0.0",
     packages=find_packages(),
+    package_data={"hostpanel_nginx": ["*.service"]},
     install_requires=["fastapi", "pydantic", "httpx"],
     entry_points={
         "hostpanel.modules": [
@@ -11,6 +12,9 @@ setup(
         ],
         "hostpanel.lifecycle": [
             "hostpanel-nginx = hostpanel_nginx.lifecycle:pre_uninstall"
+        ],
+        "hostpanel.setup": [
+            "hostpanel-nginx = hostpanel_nginx.lifecycle:on_install"
         ],
         "hostpanel.hooks.user_delete": [
             "hostpanel-nginx = hostpanel_nginx.lifecycle:on_user_delete"
