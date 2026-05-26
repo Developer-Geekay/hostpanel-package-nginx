@@ -245,8 +245,10 @@ def write_nginx_cpanel_vhost(domain_name: str):
 async def _auto_create_dns_zone(domain: str):
     pdns_url = "http://127.0.0.1:8053/api/v1/servers/localhost"
     pdns_api_key = os.environ.get("PDNS_API_KEY", "hostpanel-dns-api-key")
-    ns1 = os.environ.get("PDNS_NS1", "ns1.hostpanel.local.")
-    ns2 = os.environ.get("PDNS_NS2", "ns2.hostpanel.local.")
+    _ns1 = os.environ.get("PDNS_NS1", "ns1.hostpanel.local.")
+    _ns2 = os.environ.get("PDNS_NS2", "ns2.hostpanel.local.")
+    ns1 = _ns1 if _ns1.endswith('.') else f"{_ns1}."
+    ns2 = _ns2 if _ns2.endswith('.') else f"{_ns2}."
     server_ip = os.environ.get("SERVER_IP", "")
     name = domain if domain.endswith(".") else f"{domain}."
     headers = {"X-API-Key": pdns_api_key}
