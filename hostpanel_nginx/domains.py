@@ -204,6 +204,42 @@ server {{
         raise HTTPException(status_code=500, detail="Failed to write Nginx configuration")
 
 
+def write_nginx_cpanel_vhost(domain_name: str):
+    """Create an nginx reverse-proxy vhost for cpanel.<domain> → the panel port."""
+    panel_port = int(os.environ.get("PANEL_PORT", "2082"))
+    cpanel_fqdn = f"cpanel.{domain_name}"
+    vhost_path = f"{VHOSTS_DIR}/{cpanel_fqdn}.conf"
+    if os.path.exists(vhost_path):
+        logger.info(f"Cpanel vhost already exists for {cpanel_fqdn}, skipping")
+        return
+    vhost_config = f"""server {{
+    listen 80;
+    server_name {cpanel_fqdn};
+
+    location / {{
+        proxy_pass http://127.0.0.1:{panel_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }}
+}}
+"""
+    try:
+        os.makedirs(VHOSTS_DIR, exist_ok=True)
+        with open(vhost_path, "w") as f:
+            f.write(vhost_config)
+        nginx_reload()
+        logger.info(f"Cpanel nginx vhost written: {cpanel_fqdn} → port {panel_port}")
+    except Exception as e:
+        logger.error(f"Failed to write cpanel nginx vhost for {cpanel_fqdn}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write cpanel nginx configuration")
+
+
 # ── DNS auto-provision ─────────────────────────────────────────────────────────
 
 async def _auto_create_dns_zone(domain: str):
@@ -231,6 +267,8 @@ async def _auto_create_dns_zone(domain: str):
                     {"name": f"www.{name}", "type": "A", "ttl": 3600, "changetype": "REPLACE",
                      "records": [{"content": server_ip, "disabled": False}]},
                     {"name": f"ftp.{name}", "type": "A", "ttl": 3600, "changetype": "REPLACE",
+                     "records": [{"content": server_ip, "disabled": False}]},
+                    {"name": f"cpanel.{name}", "type": "A", "ttl": 3600, "changetype": "REPLACE",
                      "records": [{"content": server_ip, "disabled": False}]},
                 ]}
                 await client.patch(f"{pdns_url}/zones/{name}", headers=headers, json=a_payload)
@@ -288,7 +326,7 @@ async def cascade_delete_domain(domain_name: str) -> bool:
     logger.info(f"Nginx cascade: cleaning up {domain_name}")
     nginx_changed = False
 
-    # 1. Remove nginx vhost
+    # 1. Remove nginx vhost and cpanel reverse-proxy vhost
     vhost_path = f"{VHOSTS_DIR}/{domain_name}.conf"
     if os.path.exists(vhost_path):
         try:
@@ -296,6 +334,14 @@ async def cascade_delete_domain(domain_name: str) -> bool:
             nginx_changed = True
         except Exception as e:
             logger.warning(f"Could not remove vhost for {domain_name}: {e}")
+
+    cpanel_vhost_path = f"{VHOSTS_DIR}/cpanel.{domain_name}.conf"
+    if os.path.exists(cpanel_vhost_path):
+        try:
+            os.remove(cpanel_vhost_path)
+            nginx_changed = True
+        except Exception as e:
+            logger.warning(f"Could not remove cpanel vhost for {domain_name}: {e}")
 
     # 2. Revoke SSL cert
     if os.path.exists(f"/etc/letsencrypt/live/{domain_name}"):
@@ -370,6 +416,7 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
     run_command_safe(["sudo", "chmod", "-R", "755", f"/home/{username}"])
 
     write_nginx_vhost(domain, document_root)
+    write_nginx_cpanel_vhost(domain)
 
     record = {"domain_name": domain, "username": username, "document_root": document_root, "status": "active"}
     existing.append(record)
