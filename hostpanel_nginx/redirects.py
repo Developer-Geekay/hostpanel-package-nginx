@@ -67,16 +67,16 @@ def _rebuild_vhost(domain_name: str):
             f"    return 301 https://$host$request_uri;\n}}\n\n"
             f"server {{\n    listen 443 ssl;\n    server_name {domain_name} www.{domain_name};\n"
             f"    root {doc_root};\n    index index.php index.html index.htm;\n\n"
-            f"    access_log /opt/hostpanel/nginx/logs/{domain_name}.access.log;\n"
-            f"    error_log  /opt/hostpanel/nginx/logs/{domain_name}.error.log;\n"
+            f"    access_log /opt/hostpanel/plugins/nginx/logs/{domain_name}.access.log;\n"
+            f"    error_log  /opt/hostpanel/plugins/nginx/logs/{domain_name}.error.log;\n"
             f"{redirect_blocks}\n    location / {{\n        try_files $uri $uri/ /index.html;\n    }}\n}}\n"
         )
     else:
         config = (
             f"server {{\n    listen 80;\n    server_name {domain_name} www.{domain_name};\n"
             f"    root {doc_root};\n    index index.php index.html index.htm;\n\n"
-            f"    access_log /opt/hostpanel/nginx/logs/{domain_name}.access.log;\n"
-            f"    error_log  /opt/hostpanel/nginx/logs/{domain_name}.error.log;\n"
+            f"    access_log /opt/hostpanel/plugins/nginx/logs/{domain_name}.access.log;\n"
+            f"    error_log  /opt/hostpanel/plugins/nginx/logs/{domain_name}.error.log;\n"
             f"{redirect_blocks}\n    location / {{\n        try_files $uri $uri/ /index.html;\n    }}\n}}\n"
         )
 

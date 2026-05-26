@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 LETSENCRYPT_DIR = "/etc/letsencrypt/live"
 SERVICE_NAME = "hostpanel-nginx"
 SERVICE_DST = f"/etc/systemd/system/{SERVICE_NAME}.service"
-NGINX_DIR = "/opt/hostpanel/nginx"
+NGINX_DIR = "/opt/hostpanel/plugins/nginx"
 
 
 def on_install():

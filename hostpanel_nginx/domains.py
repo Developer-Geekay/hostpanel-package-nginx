@@ -20,8 +20,8 @@ from domain_registry import (
 router = APIRouter(prefix="/cpanelapi/domains", tags=["Domains"])
 logger = logging.getLogger(__name__)
 
-NGINX_BIN  = "/opt/hostpanel/nginx/sbin/nginx"
-VHOSTS_DIR = "/opt/hostpanel/nginx/vhosts"
+NGINX_BIN  = "/opt/hostpanel/plugins/nginx/nginx"
+VHOSTS_DIR = "/opt/hostpanel/plugins/nginx/vhosts"
 
 RESERVED_DOMAINS = {"localhost", "127.0.0.1"}
 
@@ -165,8 +165,8 @@ server {{
     ssl_certificate     /etc/letsencrypt/live/{domain_name}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{domain_name}/privkey.pem;
 
-    access_log /opt/hostpanel/nginx/logs/{domain_name}.access.log;
-    error_log  /opt/hostpanel/nginx/logs/{domain_name}.error.log;
+    access_log /opt/hostpanel/plugins/nginx/logs/{domain_name}.access.log;
+    error_log  /opt/hostpanel/plugins/nginx/logs/{domain_name}.error.log;
 
     location / {{
         try_files $uri $uri/ /index.html;
@@ -180,8 +180,8 @@ server {{
     root {document_root};
     index index.php index.html index.htm;
 
-    access_log /opt/hostpanel/nginx/logs/{domain_name}.access.log;
-    error_log  /opt/hostpanel/nginx/logs/{domain_name}.error.log;
+    access_log /opt/hostpanel/plugins/nginx/logs/{domain_name}.access.log;
+    error_log  /opt/hostpanel/plugins/nginx/logs/{domain_name}.error.log;
 
     location ^~ /.well-known/acme-challenge/ {{
         default_type "text/plain";
