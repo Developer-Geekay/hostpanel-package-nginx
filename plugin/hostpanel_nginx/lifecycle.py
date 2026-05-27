@@ -13,7 +13,9 @@ NGINX_DIR = "/opt/hostpanel/plugins/nginx"
 
 
 def on_install():
-    """Install hostpanel-nginx service, enable, and start it."""
+    """Install hostpanel-nginx service, enable, and start it.
+    If SERVER_DOMAIN is set in the environment, auto-provisions a website
+    entry for the default domain and a cpanel reverse-proxy vhost."""
     logger.info("Nginx on_install: setting up service")
 
     # Create required runtime directories
@@ -55,6 +57,95 @@ def on_install():
     subprocess.run(["sudo", "systemctl", "enable", SERVICE_NAME], capture_output=True)
     subprocess.run(["sudo", "systemctl", "start",  SERVICE_NAME], capture_output=True)
     logger.info("Nginx on_install: service enabled and started")
+
+    # ── Auto-provision default domain ─────────────────────────────────────────
+    _provision_default_domain()
+
+
+def _provision_default_domain():
+    """Provision a website entry and cpanel reverse-proxy vhost for the server's
+    default domain (SERVER_DOMAIN env var, set during HostPanel installation).
+
+    Safe to call on reinstall — checks domain registry before acting.
+    Only the nginx vhosts and public_html are created here; the DNS zone and
+    A records are assumed to already exist from the initial setup script.
+    """
+    server_domain = os.environ.get("SERVER_DOMAIN", "").strip()
+    if not server_domain:
+        logger.info("Nginx on_install: SERVER_DOMAIN not configured, skipping default domain provisioning")
+        return
+
+    from domain_registry import _load_domains, _save_domains
+    from hostpanel_nginx.domains import (
+        write_nginx_vhost, write_nginx_cpanel_vhost,
+        _derive_username, _random_password, _default_index_html,
+    )
+
+    existing = _load_domains()
+    already_registered = any(d["domain_name"] == server_domain for d in existing)
+
+    if already_registered:
+        # On reinstall: domain is in registry, just ensure cpanel vhost is present
+        logger.info(f"Nginx on_install: {server_domain} already registered — ensuring cpanel vhost exists")
+        try:
+            write_nginx_cpanel_vhost(server_domain)
+        except Exception as e:
+            logger.warning(f"Nginx on_install: could not write cpanel vhost for {server_domain}: {e}")
+        return
+
+    logger.info(f"Nginx on_install: provisioning default domain {server_domain}")
+
+    username = _derive_username(server_domain)
+    password = _random_password()
+    document_root = f"/home/{username}/public_html"
+
+    # Create Linux user if not present
+    try:
+        from routers.users import get_sys_users, _create_linux_user
+        if not any(u["username"] == username for u in get_sys_users()):
+            _create_linux_user(username, password)
+            logger.info(f"Nginx on_install: created Linux user '{username}'")
+        else:
+            logger.info(f"Nginx on_install: Linux user '{username}' already exists")
+    except Exception as e:
+        logger.warning(f"Nginx on_install: could not create Linux user '{username}': {e}")
+
+    # Create public_html with a default index page
+    try:
+        subprocess.run(["sudo", "-n", "mkdir", "-p", document_root], capture_output=True)
+        subprocess.run(["sudo", "-n", "chmod", "777", document_root], capture_output=True)
+        subprocess.run(
+            ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
+            input=_default_index_html(server_domain), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["sudo", "-n", "/opt/hostpanel/bin/hp-chown", f"{username}:{document_root}"],
+            capture_output=True,
+        )
+        subprocess.run(["sudo", "-n", "chmod", "-R", "755", f"/home/{username}"], capture_output=True)
+        logger.info(f"Nginx on_install: public_html created at {document_root}")
+    except Exception as e:
+        logger.warning(f"Nginx on_install: could not set up public_html for {server_domain}: {e}")
+
+    # Write nginx vhosts — main site + cpanel reverse proxy
+    try:
+        write_nginx_vhost(server_domain, document_root)
+        write_nginx_cpanel_vhost(server_domain)
+        logger.info(f"Nginx on_install: vhosts written — {server_domain} and cpanel.{server_domain}")
+    except Exception as e:
+        logger.warning(f"Nginx on_install: could not write nginx vhosts for {server_domain}: {e}")
+
+    # Register in the domain registry so the panel shows it immediately
+    record = {
+        "domain_name": server_domain,
+        "username": username,
+        "document_root": document_root,
+        "status": "active",
+    }
+    existing.append(record)
+    _save_domains(existing)
+    logger.info(f"Nginx on_install: default domain '{server_domain}' provisioned and registered")
 
 
 async def pre_uninstall(force: bool = False):
