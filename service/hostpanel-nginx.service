@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=forking
 PIDFile=/run/nginx.pid
-ExecStart=/opt/hostpanel/plugins/nginx/nginx
-ExecReload=/opt/hostpanel/plugins/nginx/nginx -s reload
-ExecStop=/opt/hostpanel/plugins/nginx/nginx -s stop
+ExecStart=/opt/hostpanel/plugins/nginx/nginx -p /opt/hostpanel/plugins/nginx -c /opt/hostpanel/plugins/nginx/nginx.conf
+ExecReload=/opt/hostpanel/plugins/nginx/nginx -p /opt/hostpanel/plugins/nginx -s reload
+ExecStop=/opt/hostpanel/plugins/nginx/nginx -p /opt/hostpanel/plugins/nginx -s stop
 Restart=on-failure
 
 [Install]

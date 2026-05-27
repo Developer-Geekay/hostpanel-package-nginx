@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # needed to create a GitHub Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build zip
+        run: |
+          ZIP="hostpanel-nginx-${{ steps.version.outputs.VERSION }}.zip"
+          zip -r "$ZIP" plugin/ bin/ conf/ service/ sudoers/ \
+            --exclude "*/__pycache__/*" --exclude "*.pyc"
+          echo "ZIP=$ZIP" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "hostpanel-nginx v${{ steps.version.outputs.VERSION }}"
+          files: ${{ env.ZIP }}
+          generate_release_notes: true
