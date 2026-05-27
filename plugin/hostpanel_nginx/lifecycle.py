@@ -18,34 +18,42 @@ def on_install():
 
     # Create required runtime directories
     os.makedirs(f"{NGINX_DIR}/vhosts", exist_ok=True)
-    os.makedirs(f"{NGINX_DIR}/logs", exist_ok=True)
+    os.makedirs(f"{NGINX_DIR}/logs",   exist_ok=True)
 
-    # Install nginx.conf and mime.types from package conf/ dir (placed there by package manager)
+    # Copy nginx.conf and mime.types from conf/ (placed by package manager)
     conf_src_dir = os.path.join(NGINX_DIR, "conf")
     for fname in ("nginx.conf", "mime.types"):
         src = os.path.join(conf_src_dir, fname)
         dst = os.path.join(NGINX_DIR, fname)
         if os.path.exists(src) and not os.path.exists(dst):
-            subprocess.run(["sudo", "tee", dst], input=open(src).read(), text=True, capture_output=True)
+            with open(src) as f:
+                content = f.read()
+            subprocess.run(["sudo", "tee", dst], input=content, text=True, capture_output=True)
             subprocess.run(["sudo", "chmod", "644", dst], capture_output=True)
             logger.info(f"Installed {fname} → {dst}")
 
+    # Install service file from service/ directory (package manager puts it there)
     if not os.path.exists(SERVICE_DST):
-        try:
-            import importlib.resources as pkg_res
-            svc_src = pkg_res.files("hostpanel_nginx").joinpath(f"{SERVICE_NAME}.service")
-            with pkg_res.as_file(svc_src) as p:
-                content = p.read_text()
-                r = subprocess.run(["sudo", "tee", SERVICE_DST], input=content, text=True, capture_output=True)
+        svc_src = os.path.join(NGINX_DIR, "service", f"{SERVICE_NAME}.service")
+        if os.path.exists(svc_src):
+            try:
+                with open(svc_src) as f:
+                    content = f.read()
+                r = subprocess.run(
+                    ["sudo", "tee", SERVICE_DST],
+                    input=content, text=True, capture_output=True,
+                )
                 if r.returncode == 0:
                     subprocess.run(["sudo", "chmod", "644", SERVICE_DST], capture_output=True)
                     logger.info(f"Installed service file → {SERVICE_DST}")
-        except Exception as e:
-            logger.warning(f"Could not install bundled service file: {e}")
+            except Exception as e:
+                logger.warning(f"Could not install service file: {e}")
+        else:
+            logger.warning(f"Service file not found at {svc_src}")
 
     subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
     subprocess.run(["sudo", "systemctl", "enable", SERVICE_NAME], capture_output=True)
-    subprocess.run(["sudo", "systemctl", "start", SERVICE_NAME], capture_output=True)
+    subprocess.run(["sudo", "systemctl", "start",  SERVICE_NAME], capture_output=True)
     logger.info("Nginx on_install: service enabled and started")
 
 

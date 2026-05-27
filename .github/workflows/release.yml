@@ -1,4 +1,4 @@
-name: Release
+﻿name: Release
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write   # needed to create a GitHub Release
+      contents: write
 
     steps:
       - name: Checkout
@@ -23,7 +23,7 @@ jobs:
       - name: Build zip
         run: |
           ZIP="hostpanel-nginx-${{ steps.version.outputs.VERSION }}.zip"
-          zip -r "$ZIP" plugin/ bin/ conf/ service/ sudoers/ \
+          zip -r "$ZIP" plugin/ bin/ conf/ service/ sudoers/ frontend/ \
             --exclude "*/__pycache__/*" --exclude "*.pyc"
           echo "ZIP=$ZIP" >> $GITHUB_ENV
 

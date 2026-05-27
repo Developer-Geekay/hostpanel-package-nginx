@@ -133,7 +133,7 @@ def _is_https_forced(domain_name: str) -> bool:
     if not os.path.exists(vhost_path):
         return False
     with open(vhost_path, "r") as f:
-        return "return 301 https://" in f.read()
+        return "return 301 https://$host" in f.read()
 
 
 def write_nginx_vhost(domain_name: str, document_root: str, https_forced: bool = False, skip_if_exists: bool = False):

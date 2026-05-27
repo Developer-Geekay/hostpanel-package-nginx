@@ -4,7 +4,6 @@ setup(
     name="hostpanel-nginx",
     version="1.0.0",
     packages=find_packages(),
-    package_data={"hostpanel_nginx": ["*.service"]},
     install_requires=["fastapi", "pydantic", "httpx"],
     entry_points={
         "hostpanel.modules": [
