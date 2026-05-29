@@ -3,6 +3,7 @@ from hostpanel_nginx.redirects import router as redirects_router
 
 PLUGIN_MANIFEST = {
     "requires_core": [1, 0, 0],
+    "needs_provisioning": True,
     "nav_items": [
         {
             "nav_route":         "nginx",

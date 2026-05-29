@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.zip
+build_zip.py
+upload.sh
+verify.sh
