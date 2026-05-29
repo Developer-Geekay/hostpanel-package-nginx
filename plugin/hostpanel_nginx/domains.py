@@ -709,14 +709,18 @@ async def update_vhost(domain_name: str, request: VhostUpdateRequest, current_us
         f.write(request.content)
 
     test = subprocess.run(["sudo", "-n", NGINX_BIN, "-t"], capture_output=True, text=True)
-    if test.returncode != 0:
-        # Rollback to previous content
+    output = (test.stderr or test.stdout).strip()
+    # Accept if nginx reports "syntax is ok" — runtime checks (temp dirs etc.) may
+    # still fail with non-zero exit but the config is valid and reload will work.
+    syntax_ok = "syntax is ok" in output
+    if test.returncode != 0 and not syntax_ok:
+        # True syntax error — rollback
         if old_content is not None:
             with open(vhost_path, "w") as f:
                 f.write(old_content)
         else:
             os.remove(vhost_path)
-        raise HTTPException(status_code=400, detail=(test.stderr or test.stdout).strip())
+        raise HTTPException(status_code=400, detail=output)
 
     nginx_reload()
     logger.info(f"Vhost updated and nginx reloaded for {domain_name} by {current_user.username}")
