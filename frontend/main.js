@@ -18,11 +18,12 @@
 
   function VhostEditorModal({ domain, onClose, onSaved }) {
     const { ok, err: toastErr } = useToast();
-    const [content,   setContent]   = useState('');
-    const [loading,   setLoading]   = useState(true);
-    const [saving,    setSaving]    = useState(false);
-    const [resetting, setResetting] = useState(false);
-    const [error,     setError]     = useState('');
+    const [content,      setContent]      = useState('');
+    const [loading,      setLoading]      = useState(true);
+    const [saving,       setSaving]       = useState(false);
+    const [resetting,    setResetting]    = useState(false);
+    const [resetConfirm, setResetConfirm] = useState(false);
+    const [error,        setError]        = useState('');
 
     useEffect(() => {
       sdk.fetch('GET', '/cpanelapi/domains/' + domain + '/vhost')
@@ -50,8 +51,8 @@
       }
     };
 
-    const reset = async () => {
-      if (!confirm('Reset "' + domain + '" vhost to the default template? Custom changes will be lost.')) return;
+    const doReset = async () => {
+      setResetConfirm(false);
       setResetting(true); setError('');
       try {
         const d = await sdk.fetch('POST', '/cpanelapi/domains/' + domain + '/vhost/reset');
@@ -104,7 +105,7 @@
             `}
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" onClick=${reset} disabled=${resetting || loading || saving}>
+            <button class="btn btn-ghost btn-sm" onClick=${() => setResetConfirm(true)} disabled=${resetting || loading || saving}>
               ${resetting ? 'Resetting…' : 'Reset to Default'}
             </button>
             <div style=${{ display: 'flex', gap: 8 }}>
@@ -116,6 +117,17 @@
           </div>
         </div>
       </div>
+
+      ${resetConfirm && html`
+        <${SdkConfirmModal}
+          open=${true}
+          title="Reset to Default"
+          message=${'Reset "' + domain + '" vhost to the default template? All custom changes will be lost.'}
+          danger=${true}
+          onClose=${() => setResetConfirm(false)}
+          onConfirm=${doReset}
+        />
+      `}
     `;
   }
 
