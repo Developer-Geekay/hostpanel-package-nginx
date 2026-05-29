@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import secrets
+import shutil
 import string
 import subprocess
 import httpx
@@ -53,6 +54,16 @@ class DomainDetail(DomainResponse):
 
 class ForceHttpsRequest(BaseModel):
     enabled: bool
+
+class DomainProvisionItem(BaseModel):
+    domain: str
+    issue_ssl: bool = False
+
+class ProvisionRequest(BaseModel):
+    domains: List[DomainProvisionItem]
+
+class VhostUpdateRequest(BaseModel):
+    content: str
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -377,6 +388,122 @@ async def cascade_delete_domain(domain_name: str) -> bool:
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+@router.get("/unprovisioned-zones")
+async def get_unprovisioned_zones(current_user: User = Depends(require_admin)):
+    """Return DNS zones that exist in PowerDNS but are not yet provisioned as websites."""
+    pdns_url = "http://127.0.0.1:8053/api/v1/servers/localhost"
+    pdns_api_key = os.environ.get("PDNS_API_KEY", "hostpanel-dns-api-key")
+    dns_zones: List[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{pdns_url}/zones", headers={"X-API-Key": pdns_api_key})
+            if resp.status_code == 200:
+                dns_zones = [z["name"].rstrip(".") for z in resp.json()]
+    except Exception as e:
+        logger.warning(f"Could not fetch DNS zones: {e}")
+
+    registered = {d["domain_name"] for d in _load_domains()}
+    unprovisioned = [z for z in dns_zones if z not in registered]
+
+    return {
+        "zones": unprovisioned,
+        "default_domain": os.environ.get("SERVER_DOMAIN", ""),
+        "certbot_available": bool(shutil.which("certbot")),
+    }
+
+
+@router.post("/provision")
+async def provision_domains(request: ProvisionRequest, current_user: User = Depends(require_admin)):
+    """Provision selected DNS zones as hosted websites. Optionally issues SSL per domain."""
+    from routers.users import get_sys_users, _create_linux_user
+
+    existing = _load_domains()
+    registered = {d["domain_name"] for d in existing}
+    results = []
+    any_ssl_requested = False
+
+    for item in request.domains:
+        domain = item.domain
+        if domain in registered:
+            results.append({"domain": domain, "status": "already_provisioned"})
+            continue
+
+        username = _derive_username(domain)
+        password = _random_password()
+        document_root = f"/home/{username}/public_html"
+
+        try:
+            # Create Linux user if not present
+            if not any(u["username"] == username for u in get_sys_users()):
+                _create_linux_user(username, password)
+
+            # Create public_html
+            subprocess.run(["sudo", "-n", "mkdir", "-p", document_root],
+                           check=True, capture_output=True)
+            subprocess.run(["sudo", "-n", "chmod", "777", document_root],
+                           check=True, capture_output=True)
+            subprocess.run(
+                ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
+                input=_default_index_html(domain), text=True, check=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["sudo", "-n", "/opt/hostpanel/bin/hp-chown",
+                 f"{username}:/home/{username}/public_html"],
+                capture_output=True,
+            )
+            subprocess.run(["sudo", "-n", "chmod", "-R", "755", f"/home/{username}"],
+                           capture_output=True)
+
+            # Write nginx vhosts (main site + cpanel reverse proxy)
+            write_nginx_vhost(domain, document_root)
+            write_nginx_cpanel_vhost(domain)
+
+            # Register in domain registry
+            record = {
+                "domain_name": domain,
+                "username": username,
+                "document_root": document_root,
+                "status": "active",
+            }
+            existing.append(record)
+            registered.add(domain)
+
+            # Issue SSL in background if requested and certbot is available
+            if item.issue_ssl and shutil.which("certbot"):
+                any_ssl_requested = True
+                certbot_email = os.environ.get("CERTBOT_EMAIL", "admin@hostpanel.local")
+                cmd = [
+                    "sudo", "certbot", "certonly", "--webroot",
+                    "-w", document_root, "-d", domain, "-d", f"www.{domain}",
+                    "--non-interactive", "--agree-tos", "--email", certbot_email,
+                    "--keep-until-expiring",
+                ]
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            results.append({
+                "domain": domain,
+                "status": "provisioned",
+                "ssl_requested": item.issue_ssl,
+            })
+            logger.info(f"Nginx provision: {domain} provisioned (ssl={item.issue_ssl})")
+
+        except Exception as e:
+            logger.error(f"Nginx provision: failed for {domain}: {e}")
+            results.append({"domain": domain, "status": "error", "error": str(e)})
+
+    _save_domains(existing)
+
+    # Enable certbot renewal timer when at least one SSL cert was requested
+    if any_ssl_requested:
+        subprocess.run(
+            ["sudo", "systemctl", "enable", "--now", "certbot.timer"],
+            capture_output=True,
+        )
+
+    return {"results": results}
+
+
 @router.get("", response_model=List[DomainDetail])
 async def list_domains(current_user: User = Depends(get_current_user)):
     domains = _load_domains()
@@ -545,6 +672,73 @@ async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, _: Us
     subdomains.append(record)
     _save_subdomains(subdomains)
     return record
+
+
+@router.get("/{domain_name}/vhost")
+async def get_vhost(domain_name: str, current_user: User = Depends(get_current_user)):
+    """Return the raw nginx vhost config for a domain."""
+    records = _load_domains()
+    record = next((d for d in records if d["domain_name"] == domain_name), None)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found")
+    check_domain_access(record, current_user)
+    vhost_path = f"{VHOSTS_DIR}/{domain_name}.conf"
+    if not os.path.exists(vhost_path):
+        raise HTTPException(status_code=404, detail="Vhost config file not found")
+    with open(vhost_path) as f:
+        content = f.read()
+    return {"domain": domain_name, "content": content, "path": vhost_path}
+
+
+@router.put("/{domain_name}/vhost")
+async def update_vhost(domain_name: str, request: VhostUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Write a new vhost config, test with nginx -t, reload on success, rollback on failure."""
+    records = _load_domains()
+    record = next((d for d in records if d["domain_name"] == domain_name), None)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found")
+    check_domain_access(record, current_user)
+
+    vhost_path = f"{VHOSTS_DIR}/{domain_name}.conf"
+    old_content = None
+    if os.path.exists(vhost_path):
+        with open(vhost_path) as f:
+            old_content = f.read()
+
+    with open(vhost_path, "w") as f:
+        f.write(request.content)
+
+    test = subprocess.run(["sudo", "-n", NGINX_BIN, "-t"], capture_output=True, text=True)
+    if test.returncode != 0:
+        # Rollback to previous content
+        if old_content is not None:
+            with open(vhost_path, "w") as f:
+                f.write(old_content)
+        else:
+            os.remove(vhost_path)
+        raise HTTPException(status_code=400, detail=(test.stderr or test.stdout).strip())
+
+    nginx_reload()
+    logger.info(f"Vhost updated and nginx reloaded for {domain_name} by {current_user.username}")
+    return {"domain": domain_name, "message": "Vhost saved and nginx reloaded"}
+
+
+@router.post("/{domain_name}/vhost/reset")
+async def reset_vhost(domain_name: str, current_user: User = Depends(get_current_user)):
+    """Regenerate the vhost from the standard template."""
+    records = _load_domains()
+    record = next((d for d in records if d["domain_name"] == domain_name), None)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found")
+    check_domain_access(record, current_user)
+
+    https_forced = _is_https_forced(domain_name)
+    write_nginx_vhost(domain_name, record["document_root"], https_forced=https_forced)
+
+    vhost_path = f"{VHOSTS_DIR}/{domain_name}.conf"
+    with open(vhost_path) as f:
+        content = f.read()
+    return {"domain": domain_name, "message": "Vhost reset to default template", "content": content}
 
 
 @router.delete("/{domain_name}/subdomains/{subdomain}")

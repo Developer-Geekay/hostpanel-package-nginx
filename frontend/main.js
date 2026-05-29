@@ -10,9 +10,114 @@
   'use strict';
 
   const sdk = window.__hpkg_sdk;
-  const { html, useState, useCallback } = sdk;
+  const { html, useState, useEffect, useCallback } = sdk;
   const { SdkFormModal, SdkConfirmModal, SdkDataTable } = sdk.components;
   const { useApi, useToast } = sdk.hooks;
+
+  // ── Vhost editor modal ──────────────────────────────────────────────────────
+
+  function VhostEditorModal({ domain, onClose, onSaved }) {
+    const { ok, err: toastErr } = useToast();
+    const [content,   setContent]   = useState('');
+    const [loading,   setLoading]   = useState(true);
+    const [saving,    setSaving]    = useState(false);
+    const [resetting, setResetting] = useState(false);
+    const [error,     setError]     = useState('');
+
+    useEffect(() => {
+      sdk.fetch('GET', '/cpanelapi/domains/' + domain + '/vhost')
+        .then(d => { setContent(d.content); setLoading(false); })
+        .catch(e => { setError(e.message || 'Failed to load vhost'); setLoading(false); });
+    }, [domain]);
+
+    useEffect(() => {
+      const esc = e => { if (e.key === 'Escape') onClose(); };
+      window.addEventListener('keydown', esc);
+      return () => window.removeEventListener('keydown', esc);
+    }, [onClose]);
+
+    const save = async () => {
+      setSaving(true); setError('');
+      try {
+        await sdk.fetch('PUT', '/cpanelapi/domains/' + domain + '/vhost', { content });
+        ok('Vhost saved & nginx reloaded');
+        if (onSaved) onSaved();
+        onClose();
+      } catch (e) {
+        setError(e.message || 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const reset = async () => {
+      if (!confirm('Reset "' + domain + '" vhost to the default template? Custom changes will be lost.')) return;
+      setResetting(true); setError('');
+      try {
+        const d = await sdk.fetch('POST', '/cpanelapi/domains/' + domain + '/vhost/reset');
+        setContent(d.content);
+        ok('Vhost reset to default template');
+      } catch (e) {
+        setError(e.message || 'Reset failed');
+      } finally {
+        setResetting(false);
+      }
+    };
+
+    return html`
+      <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+        <div class="modal animate-fade-in" style=${{ width: 740, maxWidth: '95vw' }}>
+          <div class="modal-header">
+            <span class="modal-title">Edit Vhost — ${domain}</span>
+            <button class="modal-close" onClick=${onClose} aria-label="Close">✕</button>
+          </div>
+          <div class="modal-body">
+            <p style=${{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10, marginTop: 0 }}>
+              Changes are validated with <code>nginx -t</code> before applying. nginx reloads automatically on save.
+            </p>
+            ${loading
+              ? html`<div style=${{ color: 'var(--text-3)', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>Loading…</div>`
+              : html`
+                  <textarea
+                    value=${content}
+                    onInput=${e => setContent(e.target.value)}
+                    spellcheck="false"
+                    autocomplete="off"
+                    style=${{
+                      width: '100%', boxSizing: 'border-box', height: 360,
+                      resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12,
+                      background: 'var(--bg)', color: 'var(--text)',
+                      border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                      padding: '10px 12px', outline: 'none', lineHeight: 1.65,
+                      tabSize: 4,
+                    }}
+                  />
+                `
+            }
+            ${error && html`
+              <pre style=${{
+                marginTop: 10, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: 'rgba(239,68,68,.08)', color: 'var(--err, #ef4444)',
+                border: '1px solid rgba(239,68,68,.2)', borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.5,
+              }}>${error}</pre>
+            `}
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost btn-sm" onClick=${reset} disabled=${resetting || loading || saving}>
+              ${resetting ? 'Resetting…' : 'Reset to Default'}
+            </button>
+            <div style=${{ display: 'flex', gap: 8 }}>
+              <button class="btn btn-outline btn-md" onClick=${onClose} disabled=${saving || resetting}>Cancel</button>
+              <button class="btn btn-primary btn-md" onClick=${save} disabled=${saving || loading}>
+                ${saving ? 'Saving…' : 'Save & Reload Nginx'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   // ── Subdomains panel (shown when a domain row is expanded) ──────────────────
 
@@ -99,8 +204,9 @@
     const { data: domains, loading, error, refetch } = useApi(
       () => sdk.fetch('GET', '/cpanelapi/domains'),
     );
-    const [addOpen,   setAddOpen]   = useState(false);
-    const [delTarget, setDelTarget] = useState(null);
+    const [addOpen,     setAddOpen]     = useState(false);
+    const [delTarget,   setDelTarget]   = useState(null);
+    const [vhostTarget, setVhostTarget] = useState(null);
 
     return html`
       <div class="card">
@@ -128,6 +234,9 @@
                   <${SubdomainsPanel} domainName=${row.domain_name} onMsg=${onMsg} />
                 `}
                 renderActions=${(row) => html`
+                  <button class="btn btn-ghost btn-sm" onClick=${() => setVhostTarget(row.domain_name)}>
+                    Edit Vhost
+                  </button>
                   <button class="btn btn-danger btn-sm" onClick=${() => setDelTarget(row)}>
                     Delete
                   </button>
@@ -151,6 +260,14 @@
               refetch();
               onMsg('Domain added successfully', 'ok');
             }}
+          />
+        `}
+
+        ${vhostTarget && html`
+          <${VhostEditorModal}
+            domain=${vhostTarget}
+            onClose=${() => setVhostTarget(null)}
+            onSaved=${refetch}
           />
         `}
 

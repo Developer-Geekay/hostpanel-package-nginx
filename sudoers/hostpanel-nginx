@@ -4,4 +4,5 @@
 
 # ── Bundled nginx binary operations ───────────────────────────────────────────
 %hostpanel ALL=(root) NOPASSWD: /opt/hostpanel/plugins/nginx/nginx
+%hostpanel ALL=(root) NOPASSWD: /opt/hostpanel/plugins/nginx/nginx -t
 %hostpanel ALL=(root) NOPASSWD: /opt/hostpanel/plugins/nginx/nginx -s *
