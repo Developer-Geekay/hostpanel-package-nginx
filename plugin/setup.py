@@ -27,6 +27,9 @@ setup(
         "hostpanel.hooks.ssl_cert_deleted": [
             "hostpanel-nginx = hostpanel_nginx.lifecycle:on_ssl_cert_deleted"
         ],
+        "hostpanel.hooks.ssl_cert_imported": [
+            "hostpanel-nginx = hostpanel_nginx.lifecycle:on_ssl_cert_imported"
+        ],
         "hostpanel.hooks.on_startup": [
             "hostpanel-nginx = hostpanel_nginx.lifecycle:on_startup"
         ],

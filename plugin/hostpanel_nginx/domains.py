@@ -42,6 +42,7 @@ class SubdomainResponse(BaseModel):
     document_root: str
     username: str
     status: str
+    https_forced: bool = False
 
 class DomainResponse(BaseModel):
     domain_name: str
@@ -215,20 +216,29 @@ server {{
         raise HTTPException(status_code=500, detail="Failed to write Nginx configuration")
 
 
-def write_nginx_cpanel_vhost(domain_name: str):
-    """Create an nginx reverse-proxy vhost for cpanel.<domain> → the panel port."""
-    panel_port = int(os.environ.get("PANEL_PORT", "2082"))
-    cpanel_fqdn = f"cpanel.{domain_name}"
-    vhost_path = f"{VHOSTS_DIR}/{cpanel_fqdn}.conf"
-    if os.path.exists(vhost_path):
-        logger.info(f"Cpanel vhost already exists for {cpanel_fqdn}, skipping")
-        return
-    vhost_config = f"""server {{
-    listen 80;
-    server_name {cpanel_fqdn};
+def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
+                             https_forced: bool = False,
+                             cert_path: str = "", key_path: str = ""):
+    """Create/update the nginx vhost for cpanel.<domain>.
+    HTTP-only: port panel_port → proxy to 127.0.0.1:panel_port.
+    HTTPS: port panel_port redirects to panel_ssl_port, panel_ssl_port terminates SSL
+    and proxies to 127.0.0.1:panel_port."""
+    panel_port         = int(os.environ.get("PANEL_PORT",         "2082"))
+    panel_ssl_port     = int(os.environ.get("PANEL_SSL_PORT",     "2083"))
+    panel_backend_port = int(os.environ.get("PANEL_BACKEND_PORT", "2081"))
+    cpanel_fqdn    = f"cpanel.{domain_name}"
+    vhost_path     = f"{VHOSTS_DIR}/{cpanel_fqdn}.conf"
 
-    location / {{
-        proxy_pass http://127.0.0.1:{panel_port};
+    acme_block = f"""
+    location ^~ /.well-known/acme-challenge/ {{
+        root {document_root};
+        default_type "text/plain";
+        try_files $uri =404;
+    }}
+""" if document_root else ""
+
+    proxy_block = f"""    location / {{
+        proxy_pass http://127.0.0.1:{panel_backend_port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -237,6 +247,72 @@ def write_nginx_cpanel_vhost(domain_name: str):
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 86400;
+    }}"""
+
+    if https_forced and cert_path and key_path:
+        vhost_config = f"""# Redirect HTTP to HTTPS
+server {{
+    listen {panel_port};
+    server_name {cpanel_fqdn};
+{acme_block}
+    location / {{
+        return 301 https://$host:{panel_ssl_port}$request_uri;
+    }}
+}}
+
+# HTTPS — SSL termination, proxy to panel
+server {{
+    listen {panel_ssl_port} ssl;
+    server_name {cpanel_fqdn};
+
+    ssl_certificate     {cert_path};
+    ssl_certificate_key {key_path};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+{proxy_block}
+}}
+"""
+    else:
+        vhost_config = f"""server {{
+    listen {panel_port};
+    server_name {cpanel_fqdn};
+{acme_block}
+{proxy_block}
+}}
+"""
+    try:
+        os.makedirs(VHOSTS_DIR, exist_ok=True)
+        with open(vhost_path, "w") as f:
+            f.write(vhost_config)
+        nginx_reload()
+        logger.info(f"Cpanel nginx vhost written: {cpanel_fqdn} (https={https_forced})")
+    except Exception as e:
+        logger.error(f"Failed to write cpanel nginx vhost for {cpanel_fqdn}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write cpanel nginx configuration")
+
+
+def write_nginx_ftp_vhost(domain_name: str, document_root: str):
+    """Create a minimal nginx vhost for ftp.<domain> — only for SSL cert coverage.
+    Serves /.well-known/acme-challenge/ from document_root, redirects everything else."""
+    ftp_fqdn = f"ftp.{domain_name}"
+    vhost_path = f"{VHOSTS_DIR}/{ftp_fqdn}.conf"
+    if os.path.exists(vhost_path):
+        logger.info(f"FTP vhost already exists for {ftp_fqdn}, skipping")
+        return
+    vhost_config = f"""server {{
+    listen 80;
+    server_name {ftp_fqdn};
+
+    location ^~ /.well-known/acme-challenge/ {{
+        root {document_root};
+        default_type "text/plain";
+        try_files $uri =404;
+    }}
+
+    location / {{
+        return 301 http://{domain_name}$request_uri;
     }}
 }}
 """
@@ -245,10 +321,10 @@ def write_nginx_cpanel_vhost(domain_name: str):
         with open(vhost_path, "w") as f:
             f.write(vhost_config)
         nginx_reload()
-        logger.info(f"Cpanel nginx vhost written: {cpanel_fqdn} → port {panel_port}")
+        logger.info(f"FTP nginx vhost written: {ftp_fqdn}")
     except Exception as e:
-        logger.error(f"Failed to write cpanel nginx vhost for {cpanel_fqdn}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to write cpanel nginx configuration")
+        logger.error(f"Failed to write FTP nginx vhost for {ftp_fqdn}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write FTP nginx configuration")
 
 
 # ── DNS auto-provision ─────────────────────────────────────────────────────────
@@ -455,9 +531,10 @@ async def provision_domains(request: ProvisionRequest, current_user: User = Depe
             subprocess.run(["sudo", "-n", "chmod", "-R", "755", f"/home/{username}"],
                            capture_output=True)
 
-            # Write nginx vhosts (main site + cpanel reverse proxy)
+            # Write nginx vhosts (main site + cpanel reverse proxy + ftp)
             write_nginx_vhost(domain, document_root)
-            write_nginx_cpanel_vhost(domain)
+            write_nginx_cpanel_vhost(domain, document_root)
+            write_nginx_ftp_vhost(domain, document_root)
 
             # Register in domain registry
             record = {
@@ -475,7 +552,9 @@ async def provision_domains(request: ProvisionRequest, current_user: User = Depe
                 certbot_email = os.environ.get("CERTBOT_EMAIL", "admin@hostpanel.local")
                 cmd = [
                     "sudo", "certbot", "certonly", "--webroot",
-                    "-w", document_root, "-d", domain, "-d", f"www.{domain}",
+                    "-w", document_root,
+                    "-d", domain, "-d", f"www.{domain}",
+                    "-d", f"cpanel.{domain}", "-d", f"ftp.{domain}",
                     "--non-interactive", "--agree-tos", "--email", certbot_email,
                     "--keep-until-expiring",
                 ]
@@ -626,7 +705,7 @@ async def list_subdomains(domain_name: str, _: User = Depends(require_admin)):
     domains = _load_domains()
     if not any(d["domain_name"] == domain_name for d in domains):
         raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found.")
-    return [s for s in _load_subdomains() if s["parent_domain"] == domain_name]
+    return [{**s, "https_forced": _is_https_forced(s["fqdn"])} for s in _load_subdomains() if s["parent_domain"] == domain_name]
 
 
 @router.post("/{domain_name}/subdomains", response_model=SubdomainResponse)

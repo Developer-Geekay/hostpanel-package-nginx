@@ -157,11 +157,23 @@ async def on_startup():
     if not domains:
         return
 
+    from hostpanel_nginx.domains import write_nginx_cpanel_vhost, VHOSTS_DIR
     provisioned = 0
     for domain_rec in domains:
         domain_name = domain_rec["domain_name"]
         doc_root = domain_rec.get("document_root", f"/home/{domain_rec.get('username', 'web')}/public_html")
         write_nginx_vhost(domain_name, doc_root, https_forced=False, skip_if_exists=True)
+
+        # Detect current HTTPS state from the main vhost to write the correct cpanel vhost
+        main_vhost = f"{VHOSTS_DIR}/{domain_name}.conf"
+        https_forced = False
+        if os.path.exists(main_vhost):
+            with open(main_vhost) as f:
+                https_forced = "return 301 https://" in f.read()
+        cert_path, key_path = _cert_paths_for(domain_name) if https_forced else ("", "")
+        write_nginx_cpanel_vhost(domain_name, doc_root,
+                                 https_forced=https_forced,
+                                 cert_path=cert_path, key_path=key_path)
         provisioned += 1
 
     subdomains = _load_subdomains()
@@ -226,25 +238,67 @@ async def on_domain_delete(domain: str, **kwargs):
     await cascade_delete_domain(domain)
 
 
+def _cert_paths_for(domain: str):
+    """Return (cert_path, key_path) for the domain — custom cert takes priority over LE."""
+    custom_dir = f"/opt/hostpanel/custom-certs/{domain}"
+    le_dir     = f"/etc/letsencrypt/live/{domain}"
+    if os.path.exists(f"{custom_dir}/fullchain.pem"):
+        return f"{custom_dir}/fullchain.pem", f"{custom_dir}/privkey.pem"
+    if os.path.exists(f"{le_dir}/fullchain.pem"):
+        return f"{le_dir}/fullchain.pem", f"{le_dir}/privkey.pem"
+    return "", ""
+
+
 async def on_ssl_force_https(domain: str, enabled: bool, doc_root: str = None, **kwargs):
-    """Called by core SSL when force-HTTPS is toggled. Rewrites the nginx vhost."""
-    from hostpanel_nginx.domains import write_nginx_vhost
+    """Called by core SSL when force-HTTPS is toggled. Rewrites the nginx vhost and cpanel vhost."""
+    from hostpanel_nginx.domains import write_nginx_vhost, write_nginx_cpanel_vhost
     from domain_registry import _load_domains
     if doc_root is None:
         rec = next((d for d in _load_domains() if d["domain_name"] == domain), None)
         if not rec:
             return
         doc_root = rec["document_root"]
+    cert_path, key_path = _cert_paths_for(domain)
     try:
         write_nginx_vhost(domain, doc_root, https_forced=enabled)
-        logger.info(f"Nginx vhost updated: force-HTTPS={'on' if enabled else 'off'} for {domain}")
+        write_nginx_cpanel_vhost(domain, doc_root,
+                                 https_forced=enabled,
+                                 cert_path=cert_path, key_path=key_path)
+        logger.info(f"Nginx vhost updated: force-HTTPS={'on' if enabled else 'off'} for {domain} + cpanel")
     except Exception as e:
         logger.warning(f"Could not update nginx vhost for {domain}: {e}")
 
 
+async def on_ssl_cert_imported(domain: str, cert_dir: str = None, doc_root: str = None, **kwargs):
+    """Called by core SSL when a commercial cert is imported. Updates cpanel vhost if HTTPS was already forced."""
+    from hostpanel_nginx.domains import write_nginx_vhost, write_nginx_cpanel_vhost, VHOSTS_DIR
+    from domain_registry import _load_domains
+    if doc_root is None:
+        rec = next((d for d in _load_domains() if d["domain_name"] == domain), None)
+        if not rec:
+            return
+        doc_root = rec["document_root"]
+    # Only update vhosts if force-HTTPS was already on (main vhost has return 301)
+    main_vhost = f"{VHOSTS_DIR}/{domain}.conf"
+    https_was_forced = False
+    if os.path.exists(main_vhost):
+        with open(main_vhost) as f:
+            https_was_forced = "return 301 https://" in f.read()
+    if https_was_forced:
+        cert_path, key_path = _cert_paths_for(domain)
+        try:
+            write_nginx_vhost(domain, doc_root, https_forced=True)
+            write_nginx_cpanel_vhost(domain, doc_root,
+                                     https_forced=True,
+                                     cert_path=cert_path, key_path=key_path)
+            logger.info(f"Nginx vhosts updated after cert import for {domain}")
+        except Exception as e:
+            logger.warning(f"Could not update nginx vhost after cert import for {domain}: {e}")
+
+
 async def on_ssl_cert_deleted(domain: str, doc_root: str = None, **kwargs):
-    """Called by core SSL when a cert is deleted. Downgrades the nginx vhost to plain HTTP."""
-    from hostpanel_nginx.domains import write_nginx_vhost
+    """Called by core SSL when a cert is deleted. Downgrades nginx vhost and cpanel vhost to plain HTTP."""
+    from hostpanel_nginx.domains import write_nginx_vhost, write_nginx_cpanel_vhost
     from domain_registry import _load_domains
     if doc_root is None:
         rec = next((d for d in _load_domains() if d["domain_name"] == domain), None)
@@ -253,6 +307,7 @@ async def on_ssl_cert_deleted(domain: str, doc_root: str = None, **kwargs):
         doc_root = rec["document_root"]
     try:
         write_nginx_vhost(domain, doc_root, https_forced=False)
-        logger.info(f"Nginx vhost downgraded to HTTP after cert deletion for {domain}")
+        write_nginx_cpanel_vhost(domain, doc_root, https_forced=False)
+        logger.info(f"Nginx vhosts downgraded to HTTP after cert deletion for {domain} + cpanel")
     except Exception as e:
         logger.warning(f"Could not downgrade nginx vhost for {domain}: {e}")

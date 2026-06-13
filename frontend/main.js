@@ -138,75 +138,95 @@
       () => sdk.fetch('GET', '/cpanelapi/domains/' + domainName + '/subdomains'),
       [domainName],
     );
-    const [addOpen,   setAddOpen]   = useState(false);
-    const [delTarget, setDelTarget] = useState(null);
+    const [addOpen,     setAddOpen]     = useState(false);
+    const [delTarget,   setDelTarget]   = useState(null);
+    const [vhostTarget, setVhostTarget] = useState(null);
+
+    const rowBase = {
+      display: 'flex', alignItems: 'center', gap: 0,
+      padding: '9px 16px 9px 0',
+      borderTop: '1px solid var(--border)',
+    };
+
+    const cell = (flex, extra) => ({ flex, minWidth: 0, paddingLeft: 12, ...extra });
+
+    const rows = data ?? [];
 
     return html`
-      <div style=${{ padding: '12px 16px 16px', background: 'var(--bg-3)', borderTop: '1px solid var(--border-2)' }}>
-        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <span style=${{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-2)' }}>
-            Subdomains
-          </span>
-          <button class="btn btn-ghost btn-sm" onClick=${() => setAddOpen(true)}>+ Add</button>
+      <div>
+        ${loading && html`
+          <div style=${{ ...rowBase, paddingLeft: 16, color: 'var(--text-3)', fontSize: 12 }}>Loading…</div>
+        `}
+
+        ${!loading && rows.map(sub => html`
+          <div key=${sub.fqdn} style=${rowBase}>
+            <span style=${{ width: 40, textAlign: 'center', color: 'var(--text-3)', flexShrink: 0, fontSize: 13 }}>↳</span>
+            <span class="mono" style=${{ flex: '1 1 180px', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              ${sub.fqdn}
+            </span>
+            <span style=${{ flex: '0 0 120px' }}>—</span>
+            <span style=${{ flex: '0 0 100px' }}>
+              <span class=${'badge ' + (sub.status === 'active' ? 'badge-ok' : 'badge-warn')}>${sub.status}</span>
+            </span>
+            <span style=${{ flex: '0 0 80px' }}>
+              <span class=${'badge ' + (sub.https_forced ? 'badge-ok' : 'badge-dim')}>${sub.https_forced ? 'Yes' : 'No'}</span>
+            </span>
+            <div style=${{ flex: '0 0 auto', display: 'flex', gap: 6 }}>
+              <button class="btn btn-ghost btn-sm" onClick=${() => setVhostTarget(sub.fqdn)}>Edit Vhost</button>
+              <button class="btn btn-danger btn-sm" onClick=${() => setDelTarget(sub)}>Delete</button>
+            </div>
+          </div>
+        `)}
+
+        <div style=${{ ...rowBase, paddingLeft: 40, gap: 12 }}>
+          ${!loading && !rows.length && html`
+            <span style=${{ fontSize: 12, color: 'var(--text-3)' }}>No subdomains yet</span>
+          `}
+          <button class="btn btn-ghost btn-sm" onClick=${() => setAddOpen(true)}>+ Add Subdomain</button>
         </div>
-
-        ${loading
-          ? html`<div style=${{ color: 'var(--text-3)', fontSize: 12 }}>Loading…</div>`
-          : !data?.length
-            ? html`<div style=${{ color: 'var(--text-3)', fontSize: 12 }}>No subdomains yet</div>`
-            : html`
-                <${SdkDataTable}
-                  columns=${[
-                    { key: 'fqdn',   label: 'FQDN',   type: 'mono' },
-                    { key: 'status', label: 'Status', type: 'badge' },
-                  ]}
-                  rows=${data}
-                  renderActions=${(row) => html`
-                    <button class="btn btn-danger btn-sm" onClick=${() => setDelTarget(row)}>
-                      Delete
-                    </button>
-                  `}
-                />
-              `
-        }
-
-        ${addOpen && html`
-          <${SdkFormModal}
-            open=${true}
-            title=${'Add Subdomain — ' + domainName}
-            fields=${[{
-              key: 'subdomain', label: 'Subdomain Label', type: 'text',
-              required: true, placeholder: 'www',
-            }]}
-            onClose=${() => setAddOpen(false)}
-            onSubmit=${async (values) => {
-              await sdk.fetch('POST', '/cpanelapi/domains/' + domainName + '/subdomains', values);
-              setAddOpen(false);
-              refetch();
-              onMsg('Subdomain added', 'ok');
-            }}
-          />
-        `}
-
-        ${delTarget && html`
-          <${SdkConfirmModal}
-            open=${true}
-            title="Delete Subdomain"
-            message=${'Delete ' + delTarget.fqdn + '? The directory will be removed.'}
-            danger=${true}
-            onClose=${() => setDelTarget(null)}
-            onConfirm=${async () => {
-              await sdk.fetch(
-                'DELETE',
-                '/cpanelapi/domains/' + domainName + '/subdomains/' + delTarget.subdomain,
-              );
-              setDelTarget(null);
-              refetch();
-              onMsg('Subdomain deleted', 'ok');
-            }}
-          />
-        `}
       </div>
+
+      ${addOpen && html`
+        <${SdkFormModal}
+          open=${true}
+          title=${'Add Subdomain — ' + domainName}
+          fields=${[{
+            key: 'subdomain', label: 'Subdomain prefix', type: 'text',
+            required: true, placeholder: 'e.g. blog, api, www',
+          }]}
+          onClose=${() => setAddOpen(false)}
+          onSubmit=${async (values) => {
+            await sdk.fetch('POST', '/cpanelapi/domains/' + domainName + '/subdomains', values);
+            setAddOpen(false);
+            refetch();
+            onMsg('Subdomain added', 'ok');
+          }}
+        />
+      `}
+
+      ${vhostTarget && html`
+        <${VhostEditorModal}
+          domain=${vhostTarget}
+          onClose=${() => setVhostTarget(null)}
+          onSaved=${refetch}
+        />
+      `}
+
+      ${delTarget && html`
+        <${SdkConfirmModal}
+          open=${true}
+          title="Delete Subdomain"
+          message=${'Delete ' + delTarget.fqdn + '? The nginx vhost and web directory will be removed.'}
+          danger=${true}
+          onClose=${() => setDelTarget(null)}
+          onConfirm=${async () => {
+            await sdk.fetch('DELETE', '/cpanelapi/domains/' + domainName + '/subdomains/' + delTarget.subdomain);
+            setDelTarget(null);
+            refetch();
+            onMsg('Subdomain deleted', 'ok');
+          }}
+        />
+      `}
     `;
   }
 
