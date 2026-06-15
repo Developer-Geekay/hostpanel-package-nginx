@@ -250,7 +250,7 @@ def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
     }}"""
 
     if https_forced and cert_path and key_path:
-        vhost_config = f"""# Redirect HTTP to HTTPS
+        vhost_config = f"""# Redirect panel HTTP port → panel HTTPS port
 server {{
     listen {panel_port};
     server_name {cpanel_fqdn};
@@ -260,7 +260,7 @@ server {{
     }}
 }}
 
-# HTTPS — SSL termination, proxy to panel
+# Panel HTTPS — SSL termination, proxy to backend
 server {{
     listen {panel_ssl_port} ssl;
     server_name {cpanel_fqdn};
