@@ -148,7 +148,7 @@ def _is_https_forced(domain_name: str) -> bool:
         return "return 301 https://$host" in f.read()
 
 
-def write_nginx_vhost(domain_name: str, document_root: str, https_forced: bool = False, skip_if_exists: bool = False):
+def write_nginx_vhost(domain_name: str, document_root: str, https_forced: bool = False, skip_if_exists: bool = False, cert_path: str = "", key_path: str = ""):
     if skip_if_exists and os.path.exists(f"{VHOSTS_DIR}/{domain_name}.conf"):
         logger.info(f"Nginx vhost already exists for {domain_name}, skipping")
         return
@@ -174,8 +174,8 @@ server {{
     root {document_root};
     index index.php index.html index.htm;
 
-    ssl_certificate     /etc/letsencrypt/live/{domain_name}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{domain_name}/privkey.pem;
+    ssl_certificate     {cert_path};
+    ssl_certificate_key {key_path};
 
     access_log /opt/hostpanel/plugins/nginx/logs/{domain_name}.access.log;
     error_log  /opt/hostpanel/plugins/nginx/logs/{domain_name}.error.log;
@@ -270,6 +270,8 @@ server {{
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
 {proxy_block}
 }}

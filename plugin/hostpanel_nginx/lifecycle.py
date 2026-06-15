@@ -239,13 +239,25 @@ async def on_domain_delete(domain: str, **kwargs):
 
 
 def _cert_paths_for(domain: str):
-    """Return (cert_path, key_path) for the domain — custom cert takes priority over LE."""
+    """Return (cert_path, key_path) for the domain — checks DB, custom certs, and certbot dir."""
+    try:
+        import sys as _sys
+        _backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _backend not in _sys.path:
+            _sys.path.insert(0, _backend)
+        from modules.ssl.db import get_cert
+        cert = get_cert(domain)
+        if cert and cert.get("cert_path") and os.path.exists(cert["cert_path"]):
+            key = cert["cert_path"].replace("fullchain.pem", "privkey.pem")
+            return cert["cert_path"], key
+    except Exception:
+        pass
     custom_dir = f"/opt/hostpanel/custom-certs/{domain}"
-    le_dir     = f"/etc/letsencrypt/live/{domain}"
+    new_dir    = f"/opt/hostpanel/certs/live/{domain}"
     if os.path.exists(f"{custom_dir}/fullchain.pem"):
         return f"{custom_dir}/fullchain.pem", f"{custom_dir}/privkey.pem"
-    if os.path.exists(f"{le_dir}/fullchain.pem"):
-        return f"{le_dir}/fullchain.pem", f"{le_dir}/privkey.pem"
+    if os.path.exists(f"{new_dir}/fullchain.pem"):
+        return f"{new_dir}/fullchain.pem", f"{new_dir}/privkey.pem"
     return "", ""
 
 
@@ -260,7 +272,8 @@ async def on_ssl_force_https(domain: str, enabled: bool, doc_root: str = None, *
         doc_root = rec["document_root"]
     cert_path, key_path = _cert_paths_for(domain)
     try:
-        write_nginx_vhost(domain, doc_root, https_forced=enabled)
+        write_nginx_vhost(domain, doc_root, https_forced=enabled,
+                          cert_path=cert_path, key_path=key_path)
         write_nginx_cpanel_vhost(domain, doc_root,
                                  https_forced=enabled,
                                  cert_path=cert_path, key_path=key_path)
@@ -287,7 +300,8 @@ async def on_ssl_cert_imported(domain: str, cert_dir: str = None, doc_root: str 
     if https_was_forced:
         cert_path, key_path = _cert_paths_for(domain)
         try:
-            write_nginx_vhost(domain, doc_root, https_forced=True)
+            write_nginx_vhost(domain, doc_root, https_forced=True,
+                              cert_path=cert_path, key_path=key_path)
             write_nginx_cpanel_vhost(domain, doc_root,
                                      https_forced=True,
                                      cert_path=cert_path, key_path=key_path)
