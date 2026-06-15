@@ -164,16 +164,19 @@ async def on_startup():
         doc_root = domain_rec.get("document_root", f"/home/{domain_rec.get('username', 'web')}/public_html")
         write_nginx_vhost(domain_name, doc_root, https_forced=False, skip_if_exists=True)
 
-        # Detect current HTTPS state from the main vhost to write the correct cpanel vhost
-        main_vhost = f"{VHOSTS_DIR}/{domain_name}.conf"
-        https_forced = False
-        if os.path.exists(main_vhost):
-            with open(main_vhost) as f:
-                https_forced = "return 301 https://" in f.read()
-        cert_path, key_path = _cert_paths_for(domain_name) if https_forced else ("", "")
-        write_nginx_cpanel_vhost(domain_name, doc_root,
-                                 https_forced=https_forced,
-                                 cert_path=cert_path, key_path=key_path)
+        # Only regenerate cpanel vhost if it doesn't already exist.
+        # Cert hooks (ssl_deploy, on_ssl_force_https, etc.) manage it when SSL state changes.
+        cpanel_vhost = f"{VHOSTS_DIR}/cpanel.{domain_name}.conf"
+        if not os.path.exists(cpanel_vhost):
+            main_vhost = f"{VHOSTS_DIR}/{domain_name}.conf"
+            https_forced = False
+            if os.path.exists(main_vhost):
+                with open(main_vhost) as f:
+                    https_forced = "return 301 https://" in f.read()
+            cert_path, key_path = _cert_paths_for(domain_name) if https_forced else ("", "")
+            write_nginx_cpanel_vhost(domain_name, doc_root,
+                                     https_forced=https_forced,
+                                     cert_path=cert_path, key_path=key_path)
         provisioned += 1
 
     subdomains = _load_subdomains()

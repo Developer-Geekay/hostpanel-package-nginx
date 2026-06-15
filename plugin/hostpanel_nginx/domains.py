@@ -218,7 +218,8 @@ server {{
 
 def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
                              https_forced: bool = False,
-                             cert_path: str = "", key_path: str = ""):
+                             cert_path: str = "", key_path: str = "",
+                             skip_if_exists: bool = False):
     """Create/update the nginx vhost for cpanel.<domain>.
     HTTP-only: port panel_port → proxy to 127.0.0.1:panel_port.
     HTTPS: port panel_port redirects to panel_ssl_port, panel_ssl_port terminates SSL
@@ -228,6 +229,8 @@ def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
     panel_backend_port = int(os.environ.get("PANEL_BACKEND_PORT", "2081"))
     cpanel_fqdn    = f"cpanel.{domain_name}"
     vhost_path     = f"{VHOSTS_DIR}/{cpanel_fqdn}.conf"
+    if skip_if_exists and os.path.exists(vhost_path):
+        return
 
     acme_block = f"""
     location ^~ /.well-known/acme-challenge/ {{
