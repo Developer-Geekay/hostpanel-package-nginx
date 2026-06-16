@@ -12,6 +12,7 @@ from typing import List
 
 from auth import User
 from deps import get_current_user, require_admin
+from modules.audit.logger import log_action
 from domain_registry import (
     _load_domains, _save_domains,
     _load_subdomains, _save_subdomains,
@@ -585,6 +586,9 @@ async def provision_domains(request: ProvisionRequest, current_user: User = Depe
             capture_output=True,
         )
 
+    provisioned = [r["domain"] for r in results if r["status"] == "provisioned"]
+    if provisioned:
+        log_action(current_user.username, "domain.provision", ", ".join(provisioned))
     return {"results": results}
 
 
@@ -636,6 +640,7 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
     _save_domains(existing)
 
     await _auto_create_dns_zone(domain)
+    log_action(current_user.username, "domain.add", domain, f"user={username}")
     return record
 
 
@@ -657,6 +662,7 @@ async def toggle_force_https(domain_name: str, request: ForceHttpsRequest, curre
         raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found.")
     check_domain_access(record, current_user)
     write_nginx_vhost(domain_name, record["document_root"], request.enabled)
+    log_action(current_user.username, "domain.force_https", domain_name, str(request.enabled))
     return {"domain_name": domain_name, "https_forced": request.enabled}
 
 
@@ -700,6 +706,7 @@ async def delete_domain(domain_name: str, current_user: User = Depends(require_a
     if not any(d["domain_name"] == domain_name for d in domains):
         raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found.")
     await cascade_delete_domain(domain_name)
+    log_action(current_user.username, "domain.delete", domain_name)
     return {"message": f"Domain {domain_name} and all associated resources deleted"}
 
 
@@ -714,7 +721,7 @@ async def list_subdomains(domain_name: str, _: User = Depends(require_admin)):
 
 
 @router.post("/{domain_name}/subdomains", response_model=SubdomainResponse)
-async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, _: User = Depends(require_admin)):
+async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, current_user: User = Depends(require_admin)):
     if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$', request.subdomain):
         raise HTTPException(status_code=400, detail="Subdomain label must be lowercase alphanumeric with optional hyphens.")
 
@@ -755,6 +762,7 @@ async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, _: Us
               "document_root": document_root, "username": username, "status": "active"}
     subdomains.append(record)
     _save_subdomains(subdomains)
+    log_action(current_user.username, "subdomain.add", fqdn, f"parent={domain_name}")
     return record
 
 
@@ -807,7 +815,7 @@ async def update_vhost(domain_name: str, request: VhostUpdateRequest, current_us
         raise HTTPException(status_code=400, detail=output)
 
     nginx_reload()
-    logger.info(f"Vhost updated and nginx reloaded for {domain_name} by {current_user.username}")
+    log_action(current_user.username, "domain.vhost_edit", domain_name)
     return {"domain": domain_name, "message": "Vhost saved and nginx reloaded"}
 
 
@@ -826,11 +834,12 @@ async def reset_vhost(domain_name: str, current_user: User = Depends(get_current
     vhost_path = f"{VHOSTS_DIR}/{domain_name}.conf"
     with open(vhost_path) as f:
         content = f.read()
+    log_action(current_user.username, "domain.vhost_reset", domain_name)
     return {"domain": domain_name, "message": "Vhost reset to default template", "content": content}
 
 
 @router.delete("/{domain_name}/subdomains/{subdomain}")
-async def delete_subdomain(domain_name: str, subdomain: str, _: User = Depends(require_admin)):
+async def delete_subdomain(domain_name: str, subdomain: str, current_user: User = Depends(require_admin)):
     fqdn = f"{subdomain}.{domain_name}"
     subdomains = _load_subdomains()
     record = next((s for s in subdomains if s["fqdn"] == fqdn), None)
@@ -846,4 +855,5 @@ async def delete_subdomain(domain_name: str, subdomain: str, _: User = Depends(r
     except Exception as e: logger.warning(f"Could not remove DNS record for {fqdn}: {e}")
 
     _save_subdomains([s for s in subdomains if s["fqdn"] != fqdn])
+    log_action(current_user.username, "subdomain.delete", fqdn, f"parent={domain_name}")
     return {"message": f"Subdomain {fqdn} deleted"}

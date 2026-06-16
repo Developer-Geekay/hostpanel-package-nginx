@@ -9,6 +9,7 @@ from typing import List
 from auth import User
 from deps import get_current_user
 from domain_registry import _load_domains, check_domain_access
+from modules.audit.logger import log_action
 from hostpanel_nginx.domains import _is_https_forced, nginx_reload, VHOSTS_DIR
 
 router = APIRouter(prefix="/cpanelapi/redirects", tags=["Redirects"])
@@ -116,6 +117,7 @@ async def create_redirect(request: CreateRedirectRequest, current_user: User = D
     redirects.append(record)
     _save_redirects(redirects)
     _rebuild_vhost(request.source_domain)
+    log_action(current_user.username, "redirect.create", request.source_domain, f"{request.source_path} → {request.destination}")
     return record
 
 
@@ -132,4 +134,5 @@ async def delete_redirect(redirect_id: str, current_user: User = Depends(get_cur
         check_domain_access(domain_record, current_user)
     _save_redirects([r for r in redirects if r["id"] != redirect_id])
     _rebuild_vhost(domain)
+    log_action(current_user.username, "redirect.delete", domain, f"{target['source_path']} → {target['destination']}")
     return {"message": "Redirect deleted"}
