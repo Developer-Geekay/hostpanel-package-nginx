@@ -367,11 +367,7 @@
             open=${true}
             title="Add Redirect"
             fields=${[
-              {
-                key: 'source_domain', label: 'Source Domain', type: 'select-from-api',
-                source: '/cpanelapi/domains', option_value: 'domain_name',
-                option_label: 'domain_name', required: true,
-              },
+              { key: 'source_domain', label: 'Source Domain', type: 'text', required: true, placeholder: 'example.com' },
               { key: 'source_path',  label: 'Source Path',   type: 'text', required: true, placeholder: '/old-path' },
               { key: 'destination',  label: 'Destination',   type: 'text', required: true, placeholder: 'https://example.com/new-path' },
               {
