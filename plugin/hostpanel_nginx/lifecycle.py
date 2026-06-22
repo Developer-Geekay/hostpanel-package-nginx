@@ -62,6 +62,35 @@ def on_install():
     subprocess.run(["sudo", "systemctl", "enable", SERVICE_NAME], capture_output=True)
     subprocess.run(["sudo", "systemctl", "start",  SERVICE_NAME], capture_output=True)
     logger.info("Nginx on_install: service enabled and started")
+
+    # Regenerate all cpanel vhosts so vhost-level directives (e.g. client_max_body_size)
+    # take effect without waiting for a cert renewal or manual action.
+    try:
+        from hostpanel_nginx.domains import write_nginx_cpanel_vhost
+        from domain_registry import _load_domains
+        for domain_rec in _load_domains():
+            domain_name = domain_rec["domain_name"]
+            doc_root = domain_rec.get("document_root", "")
+            cpanel_vhost = os.path.join(NGINX_DIR, "vhosts", f"cpanel.{domain_name}.conf")
+            https_forced = False
+            cert_path = key_path = ""
+            if os.path.exists(cpanel_vhost):
+                with open(cpanel_vhost) as fv:
+                    content = fv.read()
+                https_forced = " ssl;" in content
+                for line in content.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("ssl_certificate ") and "_key" not in stripped:
+                        cert_path = stripped.split()[-1].rstrip(";")
+                    elif stripped.startswith("ssl_certificate_key "):
+                        key_path = stripped.split()[-1].rstrip(";")
+            write_nginx_cpanel_vhost(domain_name, doc_root,
+                                     https_forced=https_forced,
+                                     cert_path=cert_path, key_path=key_path)
+            logger.info(f"Nginx on_install: regenerated cpanel vhost for {domain_name}")
+    except Exception as e:
+        logger.warning(f"Nginx on_install: could not regenerate cpanel vhosts: {e}")
+
     # Domain provisioning is handled interactively by the panel UI after install.
 
 

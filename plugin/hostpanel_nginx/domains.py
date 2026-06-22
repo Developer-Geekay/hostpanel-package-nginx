@@ -241,7 +241,9 @@ def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
     }}
 """ if document_root else ""
 
-    proxy_block = f"""    location / {{
+    proxy_block = f"""    client_max_body_size 50m;
+
+    location / {{
         proxy_pass http://127.0.0.1:{panel_backend_port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
