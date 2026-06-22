@@ -410,6 +410,81 @@
     `;
   }
 
+  // ── Settings tab ─────────────────────────────────────────────────────────────
+
+  function SettingsTab({ onMsg }) {
+    const [form,    setForm]    = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving,  setSaving]  = useState(false);
+
+    useEffect(() => {
+      sdk.fetch('GET', '/cpanelapi/nginx/settings')
+        .then(d => { setForm(d.settings); setLoading(false); })
+        .catch(e => { onMsg(e.message || 'Failed to load settings', 'err'); setLoading(false); });
+    }, []);
+
+    const save = async () => {
+      setSaving(true);
+      try {
+        await sdk.fetch('PUT', '/cpanelapi/nginx/settings', form);
+        onMsg('Settings saved and nginx reloaded', 'ok');
+      } catch (e) {
+        onMsg(e.message || 'Save failed', 'err');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    if (loading) return html`
+      <div class="card">
+        <div style=${{ color: 'var(--text-3)', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>Loading…</div>
+      </div>
+    `;
+
+    const field = (key, label, unit, hint) => html`
+      <div style=${{ marginBottom: 20 }}>
+        <label style=${{
+          display: 'block', fontSize: 12, fontWeight: 600,
+          color: 'var(--text-2)', marginBottom: 6,
+          textTransform: 'uppercase', letterSpacing: '.5px',
+        }}>${label}</label>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input
+            type="text"
+            class="input"
+            value=${form[key] ?? ''}
+            onInput=${e => setForm({ ...form, [key]: e.target.value })}
+            style=${{ width: 140 }}
+          />
+          ${unit && html`<span style=${{ fontSize: 13, color: 'var(--text-3)' }}>${unit}</span>`}
+        </div>
+        ${hint && html`<p style=${{ fontSize: 11, color: 'var(--text-3)', margin: '4px 0 0' }}>${hint}</p>`}
+      </div>
+    `;
+
+    return html`
+      <div class="card">
+        <div style=${{ marginBottom: 24 }}>
+          <span class="card-title">Nginx Settings</span>
+          <p style=${{ fontSize: 13, color: 'var(--text-3)', margin: '4px 0 0' }}>
+            Changes apply immediately — nginx.conf is rewritten and all panel vhosts are regenerated.
+          </p>
+        </div>
+
+        ${field('client_max_body_size', 'Max Upload Size', '', 'e.g. 50m, 100m, 1g — controls the 413 Request Entity Too Large limit')}
+        ${field('keepalive_timeout',    'Keepalive Timeout',    'seconds', 'How long to keep idle connections open')}
+        ${field('worker_connections',   'Worker Connections',   'connections', 'Max simultaneous connections per nginx worker process')}
+        ${field('proxy_read_timeout',   'Proxy Read Timeout',   'seconds', 'Timeout for reading a response from the panel backend')}
+
+        <div style=${{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button class="btn btn-primary btn-md" onClick=${save} disabled=${saving}>
+            ${saving ? 'Saving…' : 'Save & Reload Nginx'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   // ── Root component ───────────────────────────────────────────────────────────
 
   function NginxPlugin() {
@@ -425,7 +500,7 @@
         <div class="page-header">
           <div>
             <h1 class="page-title">Web Server</h1>
-            <p class="page-desc">Nginx virtual hosts & redirects</p>
+            <p class="page-desc">Nginx virtual hosts, redirects & settings</p>
           </div>
         </div>
 
@@ -438,11 +513,17 @@
             class=${'btn btn-sm ' + (tab === 'redirects' ? 'btn-primary' : 'btn-ghost')}
             onClick=${() => setTab('redirects')}
           >Redirects</button>
+          <button
+            class=${'btn btn-sm ' + (tab === 'settings'  ? 'btn-primary' : 'btn-ghost')}
+            onClick=${() => setTab('settings')}
+          >Settings</button>
         </div>
 
         ${tab === 'domains'
           ? html`<${DomainsTab}   onMsg=${onMsg} />`
-          : html`<${RedirectsTab} onMsg=${onMsg} />`
+          : tab === 'redirects'
+          ? html`<${RedirectsTab} onMsg=${onMsg} />`
+          : html`<${SettingsTab}  onMsg=${onMsg} />`
         }
       </div>
     `;

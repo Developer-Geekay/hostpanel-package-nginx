@@ -220,14 +220,25 @@ server {{
 def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
                              https_forced: bool = False,
                              cert_path: str = "", key_path: str = "",
-                             skip_if_exists: bool = False):
+                             skip_if_exists: bool = False,
+                             settings: dict | None = None,
+                             skip_reload: bool = False):
     """Create/update the nginx vhost for cpanel.<domain>.
     HTTP-only: port panel_port → proxy to 127.0.0.1:panel_port.
     HTTPS: port panel_port redirects to panel_ssl_port, panel_ssl_port terminates SSL
     and proxies to 127.0.0.1:panel_port."""
+    if settings is None:
+        try:
+            from hostpanel_nginx.settings import get_settings as _get_settings
+            settings = _get_settings()
+        except Exception:
+            settings = {}
+
     panel_port         = int(os.environ.get("PANEL_PORT",         "2082"))
     panel_ssl_port     = int(os.environ.get("PANEL_SSL_PORT",     "2083"))
     panel_backend_port = int(os.environ.get("PANEL_BACKEND_PORT", "2081"))
+    body_size          = settings.get("client_max_body_size", "50m")
+    proxy_timeout      = settings.get("proxy_read_timeout",   "86400")
     cpanel_fqdn    = f"cpanel.{domain_name}"
     vhost_path     = f"{VHOSTS_DIR}/{cpanel_fqdn}.conf"
     if skip_if_exists and os.path.exists(vhost_path):
@@ -241,7 +252,7 @@ def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
     }}
 """ if document_root else ""
 
-    proxy_block = f"""    client_max_body_size 50m;
+    proxy_block = f"""    client_max_body_size {body_size};
 
     location / {{
         proxy_pass http://127.0.0.1:{panel_backend_port};
@@ -252,7 +263,7 @@ def write_nginx_cpanel_vhost(domain_name: str, document_root: str = "",
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
+        proxy_read_timeout {proxy_timeout};
     }}"""
 
     if https_forced and cert_path and key_path:
@@ -294,7 +305,8 @@ server {{
         os.makedirs(VHOSTS_DIR, exist_ok=True)
         with open(vhost_path, "w") as f:
             f.write(vhost_config)
-        nginx_reload()
+        if not skip_reload:
+            nginx_reload()
         logger.info(f"Cpanel nginx vhost written: {cpanel_fqdn} (https={https_forced})")
     except Exception as e:
         logger.error(f"Failed to write cpanel nginx vhost for {cpanel_fqdn}: {e}")

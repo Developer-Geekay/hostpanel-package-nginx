@@ -23,21 +23,16 @@ def on_install():
               "fastcgi_temp", "uwsgi_temp", "scgi_temp"):
         os.makedirs(f"{NGINX_DIR}/{d}", exist_ok=True)
 
-    # Copy nginx.conf and mime.types from conf/ (placed by package manager).
-    # nginx.conf is always updated so temp path directives stay current.
+    # Copy mime.types from conf/ (static, not user-modifiable)
     conf_src_dir = os.path.join(NGINX_DIR, "conf")
-    for fname in ("nginx.conf", "mime.types"):
-        src = os.path.join(conf_src_dir, fname)
-        dst = os.path.join(NGINX_DIR, fname)
-        if not os.path.exists(src):
-            continue
-        force = fname == "nginx.conf"  # always refresh main conf to pick up new directives
-        if force or not os.path.exists(dst):
-            with open(src) as f:
-                content = f.read()
-            subprocess.run(["sudo", "tee", dst], input=content, text=True, capture_output=True)
-            subprocess.run(["sudo", "chmod", "644", dst], capture_output=True)
-            logger.info(f"Installed {fname} → {dst}")
+    mime_src = os.path.join(conf_src_dir, "mime.types")
+    mime_dst = os.path.join(NGINX_DIR, "mime.types")
+    if os.path.exists(mime_src) and not os.path.exists(mime_dst):
+        with open(mime_src) as f:
+            content = f.read()
+        subprocess.run(["sudo", "tee", mime_dst], input=content, text=True, capture_output=True)
+        subprocess.run(["sudo", "chmod", "644", mime_dst], capture_output=True)
+        logger.info("Installed mime.types")
 
     # Install service file from service/ directory (package manager puts it there)
     if not os.path.exists(SERVICE_DST):
@@ -63,33 +58,14 @@ def on_install():
     subprocess.run(["sudo", "systemctl", "start",  SERVICE_NAME], capture_output=True)
     logger.info("Nginx on_install: service enabled and started")
 
-    # Regenerate all cpanel vhosts so vhost-level directives (e.g. client_max_body_size)
-    # take effect without waiting for a cert renewal or manual action.
+    # Generate nginx.conf from DB settings (uses defaults on first install) and
+    # regenerate all cpanel vhosts so the new directives take effect immediately.
     try:
-        from hostpanel_nginx.domains import write_nginx_cpanel_vhost
-        from domain_registry import _load_domains
-        for domain_rec in _load_domains():
-            domain_name = domain_rec["domain_name"]
-            doc_root = domain_rec.get("document_root", "")
-            cpanel_vhost = os.path.join(NGINX_DIR, "vhosts", f"cpanel.{domain_name}.conf")
-            https_forced = False
-            cert_path = key_path = ""
-            if os.path.exists(cpanel_vhost):
-                with open(cpanel_vhost) as fv:
-                    content = fv.read()
-                https_forced = " ssl;" in content
-                for line in content.splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith("ssl_certificate ") and "_key" not in stripped:
-                        cert_path = stripped.split()[-1].rstrip(";")
-                    elif stripped.startswith("ssl_certificate_key "):
-                        key_path = stripped.split()[-1].rstrip(";")
-            write_nginx_cpanel_vhost(domain_name, doc_root,
-                                     https_forced=https_forced,
-                                     cert_path=cert_path, key_path=key_path)
-            logger.info(f"Nginx on_install: regenerated cpanel vhost for {domain_name}")
+        from hostpanel_nginx.settings import apply_settings, get_settings
+        apply_settings(get_settings())
+        logger.info("Nginx on_install: nginx.conf and cpanel vhosts generated from settings")
     except Exception as e:
-        logger.warning(f"Nginx on_install: could not regenerate cpanel vhosts: {e}")
+        logger.warning(f"Nginx on_install: settings apply failed: {e}")
 
     # Domain provisioning is handled interactively by the panel UI after install.
 
