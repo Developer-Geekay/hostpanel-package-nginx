@@ -435,7 +435,7 @@
       }
     };
 
-    if (loading) return html`
+    if (loading || !form) return html`
       <div class="card">
         <div style=${{ color: 'var(--text-3)', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>Loading…</div>
       </div>
