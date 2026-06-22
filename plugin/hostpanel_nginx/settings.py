@@ -7,9 +7,10 @@ import logging
 import os
 import re
 import subprocess
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from auth import User
 from db import get_conn
@@ -146,28 +147,20 @@ def apply_settings(settings: dict[str, str]) -> None:
 
 
 class NginxSettingsUpdate(BaseModel):
-    client_max_body_size: str | None = None
-    keepalive_timeout:    str | None = None
-    worker_connections:   str | None = None
-    proxy_read_timeout:   str | None = None
+    client_max_body_size: Optional[str] = None
+    keepalive_timeout:    Optional[str] = None
+    worker_connections:   Optional[str] = None
+    proxy_read_timeout:   Optional[str] = None
 
-    @field_validator("client_max_body_size")
-    @classmethod
-    def validate_body_size(cls, v):
-        if v is None:
-            return v
-        if not re.fullmatch(r'\d+[kmgKMG]?', v):
-            raise ValueError("Must be a number optionally followed by k, m, or g (e.g. 50m)")
-        return v.lower()
 
-    @field_validator("keepalive_timeout", "proxy_read_timeout", "worker_connections")
-    @classmethod
-    def validate_positive_int(cls, v):
-        if v is None:
-            return v
-        if not v.isdigit() or int(v) <= 0:
-            raise ValueError("Must be a positive integer")
-        return v
+def _validate_settings(data: dict) -> None:
+    body_size = data.get("client_max_body_size")
+    if body_size is not None and not re.fullmatch(r'\d+[kmgKMG]?', body_size):
+        raise HTTPException(status_code=422, detail="client_max_body_size must be a number optionally followed by k, m, or g (e.g. 50m)")
+    for field in ("keepalive_timeout", "proxy_read_timeout", "worker_connections"):
+        val = data.get(field)
+        if val is not None and (not val.isdigit() or int(val) <= 0):
+            raise HTTPException(status_code=422, detail=f"{field} must be a positive integer")
 
 
 @router.get("")
@@ -180,9 +173,12 @@ async def update_nginx_settings(
     body: NginxSettingsUpdate,
     current_user: User = Depends(require_admin),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates = {k: v for k, v in body.dict().items() if v is not None}
     if not updates:
         return {"status": "success", "message": "Nothing to update"}
+    _validate_settings(updates)
+    if "client_max_body_size" in updates:
+        updates["client_max_body_size"] = updates["client_max_body_size"].lower()
     try:
         merged = {**get_settings(), **updates}
         save_settings(updates)
