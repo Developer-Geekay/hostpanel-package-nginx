@@ -303,8 +303,15 @@ server {{
 """
     try:
         os.makedirs(VHOSTS_DIR, exist_ok=True)
-        with open(vhost_path, "w") as f:
-            f.write(vhost_config)
+        # Use sudo tee so the write succeeds regardless of whether the file
+        # was previously created by a root process (e.g. early install runs).
+        result = subprocess.run(
+            ["sudo", "tee", vhost_path],
+            input=vhost_config, text=True, capture_output=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"sudo tee failed: {result.stderr.strip()}")
+        subprocess.run(["sudo", "chmod", "644", vhost_path], capture_output=True)
         if not skip_reload:
             nginx_reload()
         logger.info(f"Cpanel nginx vhost written: {cpanel_fqdn} (https={https_forced})")

@@ -171,10 +171,23 @@ def apply_settings(settings: dict[str, str]) -> None:
     except Exception as e:
         logger.warning(f"nginx settings: could not regenerate cpanel vhosts: {e}")
 
-    subprocess.run(
-        [NGINX_BIN, "-p", NGINX_DIR, "-s", "reload"],
-        capture_output=True,
+    # Test config before reloading so a bad vhost doesn't silently block the reload
+    test = subprocess.run(
+        [NGINX_BIN, "-p", NGINX_DIR, "-t"],
+        capture_output=True, text=True,
     )
+    if test.returncode != 0:
+        logger.error(f"Nginx config test failed — not reloading: {test.stderr.strip()}")
+        raise RuntimeError(f"nginx config test failed: {test.stderr.strip()}")
+
+    reload_result = subprocess.run(
+        [NGINX_BIN, "-p", NGINX_DIR, "-s", "reload"],
+        capture_output=True, text=True,
+    )
+    if reload_result.returncode != 0:
+        logger.error(f"Nginx reload failed: {reload_result.stderr.strip()}")
+        raise RuntimeError(f"nginx reload failed: {reload_result.stderr.strip()}")
+
     logger.info("Nginx settings applied and nginx reloaded")
 
 
