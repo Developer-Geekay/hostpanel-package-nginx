@@ -112,8 +112,12 @@ def apply_settings(settings: dict[str, str]) -> None:
     subprocess.run(["sudo", "chmod", "644", conf_path], capture_output=True)
 
     try:
+        import glob
         from hostpanel_nginx.domains import write_nginx_cpanel_vhost, VHOSTS_DIR
         from domain_registry import _load_domains
+
+        processed = set()
+
         for domain_rec in _load_domains():
             domain_name = domain_rec["domain_name"]
             doc_root = domain_rec.get("document_root", "")
@@ -136,6 +140,34 @@ def apply_settings(settings: dict[str, str]) -> None:
                 cert_path=cert_path, key_path=key_path,
                 settings=settings, skip_reload=True,
             )
+            processed.add(domain_name)
+
+        # Also regenerate any cpanel vhosts that exist on disk but whose domain
+        # is not in the registry (e.g. the panel's own cpanel.<server-domain>.conf).
+        for vhost_file in glob.glob(os.path.join(VHOSTS_DIR, "cpanel.*.conf")):
+            fname = os.path.basename(vhost_file)
+            domain_name = fname[len("cpanel."):-len(".conf")]
+            if domain_name in processed:
+                continue
+            https_forced = False
+            cert_path = key_path = ""
+            with open(vhost_file) as fv:
+                content = fv.read()
+            https_forced = " ssl;" in content
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("ssl_certificate ") and "_key" not in stripped:
+                    cert_path = stripped.split()[-1].rstrip(";")
+                elif stripped.startswith("ssl_certificate_key "):
+                    key_path = stripped.split()[-1].rstrip(";")
+            write_nginx_cpanel_vhost(
+                domain_name, "",
+                https_forced=https_forced,
+                cert_path=cert_path, key_path=key_path,
+                settings=settings, skip_reload=True,
+            )
+            logger.info(f"nginx settings: regenerated orphan cpanel vhost for {domain_name}")
+
     except Exception as e:
         logger.warning(f"nginx settings: could not regenerate cpanel vhosts: {e}")
 
