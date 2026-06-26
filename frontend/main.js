@@ -14,6 +14,14 @@
   const { SdkFormModal, SdkConfirmModal, SdkDataTable } = sdk.components;
   const { useApi, useToast } = sdk.hooks;
 
+  // ── SVGs Micro-Icons matching native dashboard style ─────────────────────────
+  const SearchIcon = () => html`
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style=${{ color: 'var(--text-3)', flexShrink: 0 }}>
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  `;
+
   // ── Vhost editor modal ──────────────────────────────────────────────────────
 
   function VhostEditorModal({ domain, onClose, onSaved }) {
@@ -66,7 +74,7 @@
     };
 
     return html`
-      <div class="modal-overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+      <div class="modal-overlay" style=${{ backdropFilter: 'blur(8px)', background: 'rgba(0,0,0,0.7)' }} onClick=${e => e.target === e.currentTarget && onClose()}>
         <div class="modal animate-fade-in" style=${{ width: 740, maxWidth: '95vw' }}>
           <div class="modal-header">
             <span class="modal-title">Edit Vhost — ${domain}</span>
@@ -86,8 +94,8 @@
                     autocomplete="off"
                     style=${{
                       width: '100%', boxSizing: 'border-box', height: 360,
-                      resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12,
-                      background: 'var(--bg)', color: 'var(--text)',
+                      resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12.5,
+                      background: 'var(--bg-3, #151515)', color: 'var(--text, #f8f8f2)',
                       border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                       padding: '10px 12px', outline: 'none', lineHeight: 1.65,
                       tabSize: 4,
@@ -98,8 +106,8 @@
             ${error && html`
               <pre style=${{
                 marginTop: 10, padding: '10px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                background: 'rgba(239,68,68,.08)', color: 'var(--err, #ef4444)',
-                border: '1px solid rgba(239,68,68,.2)', borderRadius: 'var(--radius-sm)',
+                background: 'var(--err-dim)', color: 'var(--err)',
+                border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                 fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.5,
               }}>${error}</pre>
             `}
@@ -109,8 +117,8 @@
               ${resetting ? 'Resetting…' : 'Reset to Default'}
             </button>
             <div style=${{ display: 'flex', gap: 8 }}>
-              <button class="btn btn-outline btn-md" onClick=${onClose} disabled=${saving || resetting}>Cancel</button>
-              <button class="btn btn-primary btn-md" onClick=${save} disabled=${saving || loading}>
+              <button class="btn btn-outline btn-sm" onClick=${onClose} disabled=${saving || resetting}>Cancel</button>
+              <button class="btn btn-primary btn-sm" onClick=${save} disabled=${saving || loading}>
                 ${saving ? 'Saving…' : 'Save & Reload Nginx'}
               </button>
             </div>
@@ -145,10 +153,8 @@
     const rowBase = {
       display: 'flex', alignItems: 'center', gap: 0,
       padding: '9px 16px 9px 0',
-      borderTop: '1px solid var(--border)',
+      borderTop: '1px solid var(--border-2)',
     };
-
-    const cell = (flex, extra) => ({ flex, minWidth: 0, paddingLeft: 12, ...extra });
 
     const rows = data ?? [];
 
@@ -161,10 +167,10 @@
         ${!loading && rows.map(sub => html`
           <div key=${sub.fqdn} style=${rowBase}>
             <span style=${{ width: 40, textAlign: 'center', color: 'var(--text-3)', flexShrink: 0, fontSize: 13 }}>↳</span>
-            <span class="mono" style=${{ flex: '1 1 180px', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span class="mono" style=${{ flex: '1 1 180px', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
               ${sub.fqdn}
             </span>
-            <span style=${{ flex: '0 0 120px' }}>—</span>
+            <span style=${{ flex: '0 0 120px', color: 'var(--text-3)', fontSize: 12 }}>—</span>
             <span style=${{ flex: '0 0 100px' }}>
               <span class=${'badge ' + (sub.status === 'active' ? 'badge-ok' : 'badge-warn')}>${sub.status}</span>
             </span>
@@ -236,14 +242,31 @@
     const { data: domains, loading, error, refetch } = useApi(
       () => sdk.fetch('GET', '/cpanelapi/domains'),
     );
+    const [search,      setSearch]      = useState('');
     const [addOpen,     setAddOpen]     = useState(false);
     const [delTarget,   setDelTarget]   = useState(null);
     const [vhostTarget, setVhostTarget] = useState(null);
 
+    const filteredDomains = (domains ?? []).filter(d =>
+      d.domain_name.toLowerCase().includes(search.toLowerCase()) ||
+      d.username.toLowerCase().includes(search.toLowerCase())
+    );
+
     return html`
-      <div class="card">
-        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <span class="card-title">Websites</span>
+      <div class="card" style=${{ padding: '20px' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <span class="card-title" style=${{ margin: 0 }}>Websites</span>
+          
+          <div class="search-wrap" style=${{ flex: 1, minWidth: 200, margin: 0 }}>
+            <${SearchIcon} />
+            <input
+              type="text"
+              placeholder="Filter websites..."
+              value=${search}
+              onInput=${e => setSearch(e.target.value)}
+            />
+          </div>
+
           <button class="btn btn-primary btn-sm" onClick=${() => setAddOpen(true)}>
             + Add Domain
           </button>
@@ -259,7 +282,7 @@
                   { key: 'status',       label: 'Status', type: 'badge' },
                   { key: 'https_forced', label: 'HTTPS',  type: 'bool'  },
                 ]}
-                rows=${domains ?? []}
+                rows=${filteredDomains}
                 loading=${loading}
                 empty=${{ title: 'No domains yet', desc: 'Add a domain to start hosting websites' }}
                 renderExpanded=${(row) => html`
@@ -328,13 +351,31 @@
     const { data: redirects, loading, error, refetch } = useApi(
       () => sdk.fetch('GET', '/cpanelapi/redirects'),
     );
+    const [search,    setSearch]    = useState('');
     const [addOpen,   setAddOpen]   = useState(false);
     const [delTarget, setDelTarget] = useState(null);
 
+    const filteredRedirects = (redirects ?? []).filter(r =>
+      r.source_domain.toLowerCase().includes(search.toLowerCase()) ||
+      r.source_path.toLowerCase().includes(search.toLowerCase()) ||
+      r.destination.toLowerCase().includes(search.toLowerCase())
+    );
+
     return html`
-      <div class="card">
-        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <span class="card-title">Redirects</span>
+      <div class="card" style=${{ padding: '20px' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <span class="card-title" style=${{ margin: 0 }}>Redirects</span>
+          
+          <div class="search-wrap" style=${{ flex: 1, minWidth: 200, margin: 0 }}>
+            <${SearchIcon} />
+            <input
+              type="text"
+              placeholder="Filter redirects..."
+              value=${search}
+              onInput=${e => setSearch(e.target.value)}
+            />
+          </div>
+
           <button class="btn btn-primary btn-sm" onClick=${() => setAddOpen(true)}>
             + Add Redirect
           </button>
@@ -350,7 +391,7 @@
                   { key: 'destination',   label: 'Destination', type: 'mono' },
                   { key: 'type',          label: 'Type',        type: 'badge' },
                 ]}
-                rows=${redirects ?? []}
+                rows=${filteredRedirects}
                 loading=${loading}
                 empty=${{ title: 'No redirects', desc: 'Add 301/302 redirect rules per domain' }}
                 renderActions=${(row) => html`
@@ -436,7 +477,7 @@
     };
 
     if (loading || !form) return html`
-      <div class="card">
+      <div class="card" style=${{ padding: '20px' }}>
         <div style=${{ color: 'var(--text-3)', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>Loading…</div>
       </div>
     `;
@@ -444,8 +485,8 @@
     const field = (key, label, unit, hint) => html`
       <div style=${{ marginBottom: 20 }}>
         <label style=${{
-          display: 'block', fontSize: 12, fontWeight: 600,
-          color: 'var(--text-2)', marginBottom: 6,
+          display: 'block', fontSize: 11, fontWeight: 600,
+          color: 'var(--text-3)', marginBottom: 6,
           textTransform: 'uppercase', letterSpacing: '.5px',
         }}>${label}</label>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -454,16 +495,16 @@
             class="input"
             value=${form[key] ?? ''}
             onInput=${e => setForm({ ...form, [key]: e.target.value })}
-            style=${{ width: 140 }}
+            style=${{ width: 140, height: '32px', fontSize: '13px' }}
           />
-          ${unit && html`<span style=${{ fontSize: 13, color: 'var(--text-3)' }}>${unit}</span>`}
+          ${unit && html`<span style=${{ fontSize: 13, color: 'var(--text-2)' }}>${unit}</span>`}
         </div>
-        ${hint && html`<p style=${{ fontSize: 11, color: 'var(--text-3)', margin: '4px 0 0' }}>${hint}</p>`}
+        ${hint && html`<p style=${{ fontSize: 11.5, color: 'var(--text-3)', margin: '6px 0 0' }}>${hint}</p>`}
       </div>
     `;
 
     return html`
-      <div class="card">
+      <div class="card" style=${{ padding: '20px' }}>
         <div style=${{ marginBottom: 24 }}>
           <span class="card-title">Nginx Settings</span>
           <p style=${{ fontSize: 13, color: 'var(--text-3)', margin: '4px 0 0' }}>
@@ -504,17 +545,17 @@
           </div>
         </div>
 
-        <div style=${{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div class="tab-bar" style=${{ marginBottom: 20 }}>
           <button
-            class=${'btn btn-sm ' + (tab === 'domains'   ? 'btn-primary' : 'btn-ghost')}
+            class=${'tab' + (tab === 'domains'   ? ' active' : '')}
             onClick=${() => setTab('domains')}
           >Websites</button>
           <button
-            class=${'btn btn-sm ' + (tab === 'redirects' ? 'btn-primary' : 'btn-ghost')}
+            class=${'tab' + (tab === 'redirects' ? ' active' : '')}
             onClick=${() => setTab('redirects')}
           >Redirects</button>
           <button
-            class=${'btn btn-sm ' + (tab === 'settings'  ? 'btn-primary' : 'btn-ghost')}
+            class=${'tab' + (tab === 'settings'  ? ' active' : '')}
             onClick=${() => setTab('settings')}
           >Settings</button>
         </div>
