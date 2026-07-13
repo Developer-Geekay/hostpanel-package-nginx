@@ -132,6 +132,46 @@ def _random_password(length: int = 16) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _provision_tenant_webroot(username: str, domain: str) -> str:
+    """Create the tenant Linux user (idempotent) and its public_html under the
+    tenant's own home, owned by the tenant. Returns the document root.
+
+    The site lives in the tenant's home (cPanel-style), never a root-owned
+    /var/www path, and the tree is owned by the tenant — no world-writable 777.
+    Safe to re-run (used by both add_domain and the reconcile/repair path).
+    """
+    from modules.users import system as _sys_users
+
+    document_root = f"/home/{username}/public_html"
+
+    # 1. Linux user for this tenant
+    if not any(u["username"] == username for u in _sys_users.get_sys_users()):
+        _sys_users.create_linux_user(username, _random_password())
+
+    # 2. Web root
+    subprocess.run(["sudo", "-n", "mkdir", "-p", document_root],
+                   check=True, capture_output=True)
+
+    # 3. Seed index.html only if absent — never clobber an existing site
+    index_path = os.path.join(document_root, "index.html")
+    if not os.path.exists(index_path):
+        subprocess.run(
+            ["sudo", "-n", "tee", index_path],
+            input=_default_index_html(domain), text=True, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    # 4. Own the tree to the tenant; home stays traversable but not world-writable
+    subprocess.run(
+        ["sudo", "-n", "/opt/hostpanel/bin/hp-chown",
+         f"{username}:/home/{username}/public_html"],
+        capture_output=True,
+    )
+    subprocess.run(["sudo", "-n", "chmod", "-R", "755", f"/home/{username}"],
+                   capture_output=True)
+    return document_root
+
+
 def run_command_safe(command: List[str]):
     # Insert -n after sudo so sudo-rs never prompts in non-TTY context
     if command and command[0] == "sudo":
@@ -567,8 +607,6 @@ async def get_unprovisioned_zones(current_user: User = Depends(require_admin)):
 @router.post("/provision")
 async def provision_domains(request: ProvisionRequest, current_user: User = Depends(require_admin)):
     """Provision selected DNS zones as hosted websites. Optionally issues SSL per domain."""
-    from modules.users import system as _sys_users
-
     existing = _load_domains()
     registered = {d["domain_name"] for d in existing}
     results = []
@@ -581,31 +619,11 @@ async def provision_domains(request: ProvisionRequest, current_user: User = Depe
             continue
 
         username = _derive_username(domain)
-        password = _random_password()
-        document_root = f"/home/{username}/public_html"
 
         try:
-            # Create Linux user if not present
-            if not any(u["username"] == username for u in _sys_users.get_sys_users()):
-                _sys_users.create_linux_user(username, password)
-
-            # Create public_html
-            subprocess.run(["sudo", "-n", "mkdir", "-p", document_root],
-                           check=True, capture_output=True)
-            subprocess.run(["sudo", "-n", "chmod", "777", document_root],
-                           check=True, capture_output=True)
-            subprocess.run(
-                ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
-                input=_default_index_html(domain), text=True, check=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            subprocess.run(
-                ["sudo", "-n", "/opt/hostpanel/bin/hp-chown",
-                 f"{username}:/home/{username}/public_html"],
-                capture_output=True,
-            )
-            subprocess.run(["sudo", "-n", "chmod", "-R", "755", f"/home/{username}"],
-                           capture_output=True)
+            # Create the tenant user + webroot in the tenant's home (idempotent,
+            # tenant-owned — shared with add_domain and the reconcile path).
+            document_root = _provision_tenant_webroot(username, domain)
 
             # Write nginx vhosts (main site + cpanel reverse proxy + ftp)
             write_nginx_vhost(domain, document_root)
@@ -674,7 +692,9 @@ async def list_domains(current_user: User = Depends(get_current_user)):
 async def add_domain(request: DomainCreateRequest, current_user: User = Depends(require_admin)):
     domain = request.domain_name
     username = _derive_username(domain)
-    document_root = f"/var/www/{domain}"
+    # Static sites are served from the tenant's own home; proxy vhosts serve no
+    # files, so they only need an ACME webroot for certbot challenges.
+    document_root = "/opt/hostpanel/acme" if request.proxy_pass else f"/home/{username}/public_html"
 
     existing = _load_domains()
     if any(d["domain_name"] == domain for d in existing):
@@ -682,30 +702,29 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
     if domain in RESERVED_DOMAINS:
         raise HTTPException(status_code=400, detail=f"'{domain}' is a reserved domain.")
 
-    # Create document root only for non-proxy vhosts (proxy vhosts don't serve static files)
-    if not request.proxy_pass:
-        run_command_safe(["sudo", "mkdir", "-p", document_root])
-        run_command_safe(["sudo", "chmod", "755", document_root])
-        try:
-            subprocess.run(
-                ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
-                input=_default_index_html(domain), text=True, check=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-        except subprocess.CalledProcessError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to write index.html: {e.stderr.strip()}")
-
-    write_nginx_vhost(
-        domain, document_root,
-        aliases=request.aliases,
-        proxy_pass=request.proxy_pass,
-        php_version=request.php_version,
-        gzip_enabled=request.gzip_enabled,
-    )
-
+    # DB-first: record intent before any OS mutation so a mid-way failure leaves a
+    # row the reconcile/repair path can complete. document_root is deterministic.
     record = {"domain_name": domain, "username": username, "document_root": document_root, "status": "active"}
     existing.append(record)
     _save_domains(existing)
+
+    try:
+        # Non-proxy sites: create the tenant user + webroot in the tenant's home.
+        if not request.proxy_pass:
+            _provision_tenant_webroot(username, domain)
+
+        write_nginx_vhost(
+            domain, document_root,
+            aliases=request.aliases,
+            proxy_pass=request.proxy_pass,
+            php_version=request.php_version,
+            gzip_enabled=request.gzip_enabled,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Provisioning failed for '{domain}' (recorded for repair): {e.stderr.strip() if e.stderr else e}",
+        )
 
     await _auto_create_dns_zone(domain)
 
@@ -820,7 +839,6 @@ async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, curre
         raise HTTPException(status_code=409, detail=f"Subdomain '{fqdn}' already exists.")
 
     run_command_safe(["sudo", "mkdir", "-p", document_root])
-    run_command_safe(["sudo", "chmod", "777", document_root])
     try:
         subprocess.run(
             ["sudo", "-n", "tee", os.path.join(document_root, "index.html")],
@@ -829,6 +847,7 @@ async def add_subdomain(domain_name: str, request: SubdomainCreateRequest, curre
         )
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Failed to write index.html: {e.stderr.strip()}")
+    # Own to the tenant and set safe perms — no transient world-writable window.
     run_command_safe(["sudo", "/opt/hostpanel/bin/hp-chown", f"{username}:{document_root}"])
     run_command_safe(["sudo", "chmod", "-R", "755", document_root])
 
