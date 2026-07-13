@@ -193,6 +193,48 @@ async def on_startup():
         logger.info(f"Nginx on_startup: checked {provisioned} domain/subdomain vhost(s), created any that were missing")
 
 
+async def on_reconcile(report=None, **kwargs):
+    """Rebuild nginx webroots + vhosts from the domain registry (SQLite).
+
+    Called by core reconcile(). Recreates any missing tenant webroot and any
+    missing vhost, restoring a drifted domain from the DB. Existing vhosts are
+    left untouched (skip_if_exists) so manual edits aren't clobbered.
+    """
+    from domain_registry import _load_domains, _load_subdomains
+    from hostpanel_nginx.domains import (
+        _provision_tenant_webroot, write_nginx_vhost, nginx_reload,
+    )
+
+    rebuilt = 0
+    for d in _load_domains():
+        domain = d["domain_name"]
+        username = d.get("username")
+        doc_root = d.get("document_root") or (f"/home/{username}/public_html" if username else "")
+        try:
+            # Static/tenant sites live under a home — recreate their webroot.
+            if username and doc_root.startswith("/home/"):
+                _provision_tenant_webroot(username, domain)
+            write_nginx_vhost(domain, doc_root, https_forced=False, skip_if_exists=True)
+            rebuilt += 1
+        except Exception as e:
+            logger.warning(f"nginx reconcile: domain '{domain}' failed: {e}")
+            if isinstance(report, dict):
+                report.setdefault("errors", []).append(f"nginx:{domain}: {e}")
+
+    for sub in _load_subdomains():
+        try:
+            write_nginx_vhost(sub["fqdn"], sub["document_root"], https_forced=False, skip_if_exists=True)
+            rebuilt += 1
+        except Exception as e:
+            logger.warning(f"nginx reconcile: subdomain '{sub.get('fqdn')}' failed: {e}")
+
+    if rebuilt:
+        nginx_reload()
+    logger.info(f"nginx reconcile: rebuilt {rebuilt} vhost(s) from registry")
+    if isinstance(report, dict):
+        report["nginx_vhosts_rebuilt"] = rebuilt
+
+
 async def on_user_delete(username: str, **kwargs):
     """Called by core when a hosting user is deleted. Cleans up nginx vhosts and SSL certs.
     DNS zones are NOT deleted here — DNS is managed by core independently."""

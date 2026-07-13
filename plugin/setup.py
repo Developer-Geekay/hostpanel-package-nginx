@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="hostpanel-nginx",
-    version="1.0.18",
+    version="1.0.19",
     packages=find_packages(),
     install_requires=["fastapi", "pydantic", "httpx"],
     entry_points={
@@ -32,6 +32,9 @@ setup(
         ],
         "hostpanel.hooks.on_startup": [
             "hostpanel-nginx = hostpanel_nginx.lifecycle:on_startup"
+        ],
+        "hostpanel.hooks.reconcile": [
+            "hostpanel-nginx = hostpanel_nginx.lifecycle:on_reconcile"
         ],
     }
 )
