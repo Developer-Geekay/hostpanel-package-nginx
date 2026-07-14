@@ -23,16 +23,21 @@ def on_install():
               "fastcgi_temp", "uwsgi_temp", "scgi_temp"):
         os.makedirs(f"{NGINX_DIR}/{d}", exist_ok=True)
 
-    # Copy mime.types from conf/ (static, not user-modifiable)
+    # Static includes referenced by nginx.conf / PHP vhosts (`include mime.types;`,
+    # `include fastcgi_params;`), copied from conf/ to the nginx root. The panel
+    # owns /opt/hostpanel/plugins/nginx (it runs as the service account), so these
+    # are plain file writes — no sudo/subprocess needed.
     conf_src_dir = os.path.join(NGINX_DIR, "conf")
-    mime_src = os.path.join(conf_src_dir, "mime.types")
-    mime_dst = os.path.join(NGINX_DIR, "mime.types")
-    if os.path.exists(mime_src) and not os.path.exists(mime_dst):
-        with open(mime_src) as f:
-            content = f.read()
-        subprocess.run(["sudo", "tee", mime_dst], input=content, text=True, capture_output=True)
-        subprocess.run(["sudo", "chmod", "644", mime_dst], capture_output=True)
-        logger.info("Installed mime.types")
+    for _name in ("mime.types", "fastcgi_params"):
+        _src = os.path.join(conf_src_dir, _name)
+        _dst = os.path.join(NGINX_DIR, _name)
+        if os.path.exists(_src) and not os.path.exists(_dst):
+            with open(_src) as f:
+                _content = f.read()
+            with open(_dst, "w") as f:
+                f.write(_content)
+            os.chmod(_dst, 0o644)
+            logger.info(f"Installed {_name}")
 
     # Install service file from service/ directory (package manager puts it there)
     if not os.path.exists(SERVICE_DST):
