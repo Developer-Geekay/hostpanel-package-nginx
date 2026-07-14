@@ -12,6 +12,32 @@ SERVICE_DST = f"/etc/systemd/system/{SERVICE_NAME}.service"
 NGINX_DIR = "/opt/hostpanel/plugins/nginx"
 
 
+def _ensure_static_includes():
+    """Copy static includes (mime.types, fastcgi_params) from conf/ to the nginx
+    root, where nginx.conf / PHP vhosts reference them by `include <name>;`.
+
+    Called from both on_install and on_startup so it self-heals: a package
+    update can't run its own new on_install (plugin modules are cached in the
+    running process until restart), but the next startup runs the fresh code.
+    The panel owns /opt/hostpanel/plugins/nginx, so these are plain file writes —
+    no sudo/subprocess.
+    """
+    conf_src_dir = os.path.join(NGINX_DIR, "conf")
+    for name in ("mime.types", "fastcgi_params"):
+        src = os.path.join(conf_src_dir, name)
+        dst = os.path.join(NGINX_DIR, name)
+        if os.path.exists(src) and not os.path.exists(dst):
+            try:
+                with open(src) as f:
+                    content = f.read()
+                with open(dst, "w") as f:
+                    f.write(content)
+                os.chmod(dst, 0o644)
+                logger.info(f"Installed {name}")
+            except Exception as e:
+                logger.warning(f"Could not install {name}: {e}")
+
+
 def on_install():
     """Install hostpanel-nginx service, enable, and start it.
     If SERVER_DOMAIN is set in the environment, auto-provisions a website
@@ -23,21 +49,7 @@ def on_install():
               "fastcgi_temp", "uwsgi_temp", "scgi_temp"):
         os.makedirs(f"{NGINX_DIR}/{d}", exist_ok=True)
 
-    # Static includes referenced by nginx.conf / PHP vhosts (`include mime.types;`,
-    # `include fastcgi_params;`), copied from conf/ to the nginx root. The panel
-    # owns /opt/hostpanel/plugins/nginx (it runs as the service account), so these
-    # are plain file writes — no sudo/subprocess needed.
-    conf_src_dir = os.path.join(NGINX_DIR, "conf")
-    for _name in ("mime.types", "fastcgi_params"):
-        _src = os.path.join(conf_src_dir, _name)
-        _dst = os.path.join(NGINX_DIR, _name)
-        if os.path.exists(_src) and not os.path.exists(_dst):
-            with open(_src) as f:
-                _content = f.read()
-            with open(_dst, "w") as f:
-                f.write(_content)
-            os.chmod(_dst, 0o644)
-            logger.info(f"Installed {_name}")
+    _ensure_static_includes()
 
     # Install service file from service/ directory (package manager puts it there)
     if not os.path.exists(SERVICE_DST):
@@ -152,6 +164,10 @@ async def on_startup():
     vhosts for any domains in the registry that don't already have a config."""
     from domain_registry import _load_domains, _load_subdomains
     from hostpanel_nginx.domains import write_nginx_vhost, VHOSTS_DIR
+
+    # Self-heal static includes (fixes boxes where a prior update's on_install
+    # ran stale cached code and never placed fastcgi_params/mime.types).
+    _ensure_static_includes()
 
     result = subprocess.run(
         ["sudo", "systemctl", "is-active", SERVICE_NAME],
