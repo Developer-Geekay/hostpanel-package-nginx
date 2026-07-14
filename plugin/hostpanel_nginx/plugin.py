@@ -17,11 +17,12 @@ PLUGIN_MANIFEST = {
         },
     ],
     "service": {
-        "name":       "nginx",
-        "unit":       "hostpanel-nginx",
-        "label":      "Web Server",
-        "icon":       "public",
-        "can_reload": True,
+        "name":        "nginx",
+        "unit":        "hostpanel-nginx",
+        "label":       "Web Server",
+        "icon":        "public",
+        "can_reload":  True,
+        "config_path": "/opt/hostpanel/plugins/nginx/nginx.conf",
     },
 }
 
