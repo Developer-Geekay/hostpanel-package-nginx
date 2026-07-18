@@ -195,6 +195,31 @@ def _is_https_forced(domain_name: str) -> bool:
         return "return 301 https://$host" in f.read()
 
 
+def _render_nodejs_domain(domain_name: str, cert_path: str = "", key_path: str = ""):
+    """Domains owned by a Node.js app render through the core's single vhost
+    template (reverse proxy + custom routes + SSL awareness). Writing this
+    package's static/php template for such a domain would clobber the app's
+    proxy — the historical 403-after-restart bug. Returns the rendered config,
+    or None when the domain has no Node.js app (or the plugin/core renderer
+    isn't available, e.g. older installs), in which case the caller proceeds
+    with its own template."""
+    try:
+        from hostpanel_nodejs.store import get_app_by_domain
+        app = get_app_by_domain(domain_name)
+        if not app:
+            return None
+        if not cert_path or not key_path:
+            try:
+                from hostpanel_nodejs.validators import _find_cert_paths
+                cert_path, key_path = _find_cert_paths(domain_name)
+            except Exception:
+                cert_path, key_path = "", ""
+        from nginx_vhost import render_domain_vhost
+        return render_domain_vhost(domain_name, app["username"], cert_path or "", key_path or "")
+    except Exception:
+        return None
+
+
 def write_nginx_vhost(domain_name: str, document_root: str, https_forced: bool = False,
                       skip_if_exists: bool = False, cert_path: str = "", key_path: str = "",
                       aliases: str = "", proxy_pass: str = "", php_version: str = "",
@@ -202,6 +227,22 @@ def write_nginx_vhost(domain_name: str, document_root: str, https_forced: bool =
     if skip_if_exists and os.path.exists(f"{VHOSTS_DIR}/{domain_name}.conf"):
         logger.info(f"Nginx vhost already exists for {domain_name}, skipping")
         return
+
+    # Node.js-owned domains: every flow that lands here (startup provisioning,
+    # force-https toggle, SSL enable/disable, re-provision) emits the correct
+    # proxy vhost instead of clobbering it with the static template.
+    delegated = _render_nodejs_domain(domain_name, cert_path, key_path)
+    if delegated is not None:
+        try:
+            os.makedirs(VHOSTS_DIR, exist_ok=True)
+            with open(f"{VHOSTS_DIR}/{domain_name}.conf", "w") as f:
+                f.write(delegated)
+            nginx_reload()
+            logger.info(f"Nginx vhost for {domain_name} rendered via core (Node.js app domain)")
+            return
+        except Exception as e:
+            logger.error(f"Failed to write delegated vhost for {domain_name}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to write Nginx configuration")
 
     alias_extras = " ".join(a.strip() for a in aliases.split() if a.strip()) if aliases else ""
     server_names = f"{domain_name} www.{domain_name}" + (f" {alias_extras}" if alias_extras else "")
