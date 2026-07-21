@@ -27,6 +27,16 @@ sudo systemctl restart hostpanel-api
 
 API prefixes: `/cpanelapi/domains/`, `/cpanelapi/redirects/`
 
+### VHost-only creation
+
+The **+ VHost Only** button (and `POST /cpanelapi/domains/vhost-only`) registers a domain
+and writes *only* its nginx server block — no tenant Linux user, no `public_html`, and no
+DNS zone. The operator supplies the `document_root` (static) or `proxy_pass` (proxy) and maps
+DNS + creates the directory themselves; the operator-supplied root is validated (absolute path,
+safe characters) before it is written into nginx config. The domain still lists, edits, and
+deletes like any other. This is a separate path from **+ Add VHost** (full provisioning), which
+is unchanged.
+
 ## Entry points
 
 | Group | Name | Points to |
