@@ -39,6 +39,18 @@ class DomainCreateRequest(BaseModel):
     https_enabled: bool = False
     https_forced: bool = False
 
+class VhostOnlyCreateRequest(BaseModel):
+    """Vhost-only creation: write just the nginx server block. No tenant user,
+    no public_html, no DNS zone — the operator maps DNS and the document root
+    themselves. Independent of the full add_domain provisioning flow."""
+    domain_name: str
+    aliases: str = ""
+    document_root: str = ""
+    proxy_pass: str = ""
+    php_version: str = ""
+    gzip_enabled: bool = False
+    https_forced: bool = False
+
 class SubdomainCreateRequest(BaseModel):
     subdomain: str
 
@@ -119,6 +131,27 @@ def _default_index_html(hostname: str) -> str:
 </body>
 </html>
 """
+
+
+# An operator-supplied document root is interpolated into privileged nginx
+# config (`root {document_root};`). Constrain it to an absolute path of safe
+# path characters so it can never carry an nginx directive/injection payload.
+_DOC_ROOT_RE = re.compile(r"^/(?:[A-Za-z0-9._-]+/?)+$")
+
+
+def _validate_document_root(root: str) -> str:
+    root = (root or "").strip().rstrip("/")
+    if not root:
+        raise HTTPException(
+            status_code=400,
+            detail="Document root is required for a static vhost-only host.",
+        )
+    if ".." in root or not _DOC_ROOT_RE.match(root):
+        raise HTTPException(
+            status_code=400,
+            detail="Document root must be an absolute path using letters, digits, '.', '_', '-', '/'.",
+        )
+    return root
 
 
 def _derive_username(domain: str) -> str:
@@ -782,6 +815,42 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     log_action(current_user.username, "domain.add", domain, f"user={username}")
+    return record
+
+
+@router.post("/vhost-only", response_model=DomainResponse)
+async def add_vhost_only(request: VhostOnlyCreateRequest, current_user: User = Depends(require_admin)):
+    """Register a domain and write ONLY its nginx server block. Creates no tenant
+    user, no public_html, and no DNS zone — the operator maps DNS and creates the
+    document root themselves. The domain still lists/edits/deletes like any other.
+    Independent of add_domain; the full-provisioning flow is left untouched."""
+    domain = request.domain_name
+    username = _derive_username(domain)
+
+    existing = _load_domains()
+    if any(d["domain_name"] == domain for d in existing):
+        raise HTTPException(status_code=409, detail=f"Domain '{domain}' is already provisioned.")
+    if domain in RESERVED_DOMAINS:
+        raise HTTPException(status_code=400, detail=f"'{domain}' is a reserved domain.")
+
+    # Proxy vhosts serve no files (ACME webroot only); static vhosts use the
+    # operator-supplied, injection-validated root.
+    document_root = "/opt/hostpanel/acme" if request.proxy_pass else _validate_document_root(request.document_root)
+
+    record = {"domain_name": domain, "username": username, "document_root": document_root, "status": "active"}
+    existing.append(record)
+    _save_domains(existing)
+
+    write_nginx_vhost(
+        domain, document_root,
+        https_forced=request.https_forced,
+        aliases=request.aliases,
+        proxy_pass=request.proxy_pass,
+        php_version=request.php_version,
+        gzip_enabled=request.gzip_enabled,
+    )
+
+    log_action(current_user.username, "domain.add_vhost_only", domain, f"user={username} root={document_root}")
     return record
 
 

@@ -297,6 +297,159 @@
       </div>`;
   }
 
+  // ── VHost-only inline form (writes just the nginx block; no user/DNS/folders) ─
+
+  function AddVhostOnlyForm({ onCancel, onCreated }) {
+    const [formDomain, setFormDomain] = useState('');
+    const [formAliases, setFormAliases] = useState('');
+    const [formRoot, setFormRoot] = useState('/var/www/');
+    const [formPhp, setFormPhp] = useState('');
+    const [formProxy, setFormProxy] = useState('');
+    const [formBackendType, setFormBackendType] = useState('static');
+    const [formForceHttps, setFormForceHttps] = useState(false);
+    const [formGzip, setFormGzip] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
+    const submit = async (e) => {
+      e.preventDefault();
+      setError('');
+      if (!formDomain.trim()) { setError('Domain name is required'); return; }
+      if (formBackendType === 'static' && !formRoot.trim()) { setError('Document root is required'); return; }
+      setBusy(true);
+      try {
+        await sdk.fetch('POST', '/cpanelapi/domains/vhost-only', {
+          domain_name: formDomain.trim(),
+          aliases: formAliases.trim(),
+          document_root: formRoot.trim(),
+          php_version: formBackendType === 'static' ? formPhp : '',
+          proxy_pass: formBackendType === 'proxy' ? formProxy.trim() : '',
+          https_forced: formForceHttps,
+          gzip_enabled: formGzip,
+        });
+        onCreated();
+      } catch (e) {
+        setError(e.message || 'Failed to create vhost');
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const checkStyle = (checked) => ({
+      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+      background: 'var(--bg-3)', border: '1px solid var(--border)',
+      borderRadius: 8, cursor: 'pointer',
+    });
+
+    return html`
+      <div class="animate-fade-in" style=${{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', padding: 0 }}>
+        <div class="split-pane-header" style=${{ padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style=${{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+            <${CodeIcon} color="var(--accent)" size=${15} />
+          </div>
+          <h3 style=${{ margin: 0, flex: 1 }}>New VHost (config only)</h3>
+          <button class="btn btn-ghost btn-sm" onClick=${onCancel}>✕</button>
+        </div>
+        <div style=${{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          <form onSubmit=${submit}>
+
+            <div style=${{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18, padding: '10px 12px', background: 'var(--bg-3)', border: '1px solid var(--border)', borderRadius: 8 }}>
+              Writes only the nginx server block. No Linux user, <span class="mono">public_html</span>, or DNS
+              zone is created — point DNS at the server and create the document root yourself.
+            </div>
+
+            <div style=${{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              Domain<div style=${{ flex: 1, height: 1, background: 'var(--border)' }}></div>
+            </div>
+
+            <div style=${{ display: 'flex', gap: 12, marginBottom: 13 }}>
+              <div style=${{ flex: 1 }}>
+                <label class="form-label">Domain Name <span style=${{ color: 'var(--err)' }}>*</span></label>
+                <input class="form-input" placeholder="e.g. app.example.com" value=${formDomain} onInput=${e => setFormDomain(e.target.value)} required />
+              </div>
+              <div style=${{ width: 200 }}>
+                <label class="form-label">Aliases (optional)</label>
+                <input class="form-input" placeholder="www.app.example.com" value=${formAliases} onInput=${e => setFormAliases(e.target.value)} />
+              </div>
+            </div>
+
+            <div style=${{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', margin: '18px 0 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              Backend<div style=${{ flex: 1, height: 1, background: 'var(--border)' }}></div>
+            </div>
+
+            <div style=${{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <label style=${{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, background: 'var(--bg-3)', border: formBackendType === 'static' ? '2px solid var(--accent)' : '1px solid var(--border)', borderRadius: 8, cursor: 'pointer' }}>
+                <input type="radio" name="vhotype" value="static" checked=${formBackendType === 'static'} onChange=${() => setFormBackendType('static')} style=${{ accentColor: 'var(--accent)', marginTop: 2 }} />
+                <div>
+                  <div style=${{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>Static / PHP</div>
+                  <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>Serve files from document root</div>
+                </div>
+              </label>
+              <label style=${{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, background: 'var(--bg-3)', border: formBackendType === 'proxy' ? '2px solid var(--accent)' : '1px solid var(--border)', borderRadius: 8, cursor: 'pointer' }}>
+                <input type="radio" name="vhotype" value="proxy" checked=${formBackendType === 'proxy'} onChange=${() => setFormBackendType('proxy')} style=${{ accentColor: 'var(--accent)', marginTop: 2 }} />
+                <div>
+                  <div style=${{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>Reverse Proxy</div>
+                  <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>Forward to an app server</div>
+                </div>
+              </label>
+            </div>
+
+            ${formBackendType === 'static' && html`
+              <div style=${{ marginBottom: 13 }}>
+                <label class="form-label">Document Root <span style=${{ color: 'var(--err)' }}>*</span></label>
+                <input class="form-input" value=${formRoot} onInput=${e => setFormRoot(e.target.value)} required />
+                <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 5 }}>Used verbatim as the nginx root — create this directory yourself.</div>
+              </div>
+              <div style=${{ marginBottom: 13 }}>
+                <label class="form-label">PHP Version</label>
+                <select class="form-select" style=${{ width: '100%' }} value=${formPhp} onChange=${e => setFormPhp(e.target.value)}>
+                  <option value="">None (static)</option>
+                  <option value="php8.3-fpm">PHP 8.3 (FPM)</option>
+                  <option value="php8.2-fpm">PHP 8.2 (FPM)</option>
+                  <option value="php8.1-fpm">PHP 8.1 (FPM)</option>
+                </select>
+              </div>`}
+
+            ${formBackendType === 'proxy' && html`
+              <div style=${{ marginBottom: 13 }}>
+                <label class="form-label">Proxy Pass</label>
+                <input class="form-input" placeholder="http://127.0.0.1:3000" value=${formProxy} onInput=${e => setFormProxy(e.target.value)} />
+              </div>`}
+
+            <div style=${{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', margin: '18px 0 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              Options<div style=${{ flex: 1, height: 1, background: 'var(--border)' }}></div>
+            </div>
+
+            <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+              <label style=${checkStyle(formForceHttps)}>
+                <input type="checkbox" checked=${formForceHttps} onChange=${e => setFormForceHttps(e.target.checked)} style=${{ accentColor: 'var(--accent)', width: 14, height: 14 }} />
+                <div>
+                  <div style=${{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>Force HTTPS</div>
+                  <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>Needs a cert you install</div>
+                </div>
+              </label>
+              <label style=${checkStyle(formGzip)}>
+                <input type="checkbox" checked=${formGzip} onChange=${e => setFormGzip(e.target.checked)} style=${{ accentColor: 'var(--accent)', width: 14, height: 14 }} />
+                <div>
+                  <div style=${{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>Enable Gzip</div>
+                  <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>Compress responses</div>
+                </div>
+              </label>
+            </div>
+
+            ${error && html`<div style=${{ color: 'var(--err)', fontSize: 12, marginBottom: 12 }}>${error}</div>`}
+
+            <div style=${{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <button type="submit" class="btn btn-primary btn-sm" disabled=${busy}>
+                ${busy ? 'Creating…' : 'Create VHost'}
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" onClick=${onCancel} disabled=${busy}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  }
+
   // ── Domain Redirects tab component ──────────────────────────────────────────
 
   function RedirectsPane({ domainName }) {
@@ -677,6 +830,7 @@
     const [search, setSearch] = useState('');
     const [selectedDomain, setSelectedDomain] = useState(null);
     const [addingNew, setAddingNew] = useState(false);
+    const [addingVhostOnly, setAddingVhostOnly] = useState(false);
     const [editingSettings, setEditingSettings] = useState(false);
 
     const filtered = useMemo(() => {
@@ -691,7 +845,7 @@
 
     // After domain list loads, auto-select first one
     useEffect(() => {
-      if (!selectedDomain && domains && domains.length > 0 && !addingNew && !editingSettings) {
+      if (!selectedDomain && domains && domains.length > 0 && !addingNew && !addingVhostOnly && !editingSettings) {
         setSelectedDomain(domains[0]);
       }
     }, [domains, editingSettings]);
@@ -699,11 +853,20 @@
     const selectDomain = (d) => {
       setSelectedDomain(d);
       setAddingNew(false);
+      setAddingVhostOnly(false);
       setEditingSettings(false);
     };
 
     const triggerAdd = () => {
       setAddingNew(true);
+      setAddingVhostOnly(false);
+      setSelectedDomain(null);
+      setEditingSettings(false);
+    };
+
+    const triggerAddVhostOnly = () => {
+      setAddingVhostOnly(true);
+      setAddingNew(false);
       setSelectedDomain(null);
       setEditingSettings(false);
     };
@@ -711,11 +874,13 @@
     const triggerSettings = () => {
       setEditingSettings(true);
       setAddingNew(false);
+      setAddingVhostOnly(false);
       setSelectedDomain(null);
     };
 
     const onCreated = () => {
       setAddingNew(false);
+      setAddingVhostOnly(false);
       refetch();
     };
 
@@ -753,6 +918,7 @@
             <button class="btn btn-outline btn-sm" onClick=${triggerSettings} style=${{ display: 'flex', alignItems: 'center', gap: 5 }}>
               ⚙ Settings
             </button>
+            <button class="btn btn-outline btn-sm" onClick=${triggerAddVhostOnly}>+ VHost Only</button>
             <button class="btn btn-primary btn-sm" onClick=${triggerAdd}>+ Add VHost</button>
           </div>
         </div>
@@ -812,6 +978,8 @@
               ? html`<${SettingsTab} />`
               : addingNew
               ? html`<${AddVhostForm} onCancel=${() => setAddingNew(false)} onCreated=${onCreated} />`
+              : addingVhostOnly
+              ? html`<${AddVhostOnlyForm} onCancel=${() => setAddingVhostOnly(false)} onCreated=${onCreated} />`
               : selectedDomain
               ? html`<${VhostDetail} domain=${selectedDomain} onDeleted=${onDeleted} onRefetch=${onRefetch} />`
               : html`
