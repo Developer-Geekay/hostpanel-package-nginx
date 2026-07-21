@@ -326,7 +326,7 @@
           proxy_pass: formBackendType === 'proxy' ? formProxy.trim() : '',
           gzip_enabled: formGzip,
         });
-        ok('VHost config written (not tracked as a managed domain)');
+        ok('Config-only vhost created');
         onCreated();
       } catch (e) {
         setError(e.message || 'Failed to create vhost');
@@ -354,9 +354,9 @@
           <form onSubmit=${submit}>
 
             <div style=${{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18, padding: '10px 12px', background: 'var(--bg-3)', border: '1px solid var(--border)', borderRadius: 8 }}>
-              Writes only the nginx server block. No Linux user, <span class="mono">public_html</span>, DNS zone,
-              or domain record is created — so it won't appear in the Virtual Hosts or SSL lists. You own DNS,
-              the document root, and TLS. To remove it, delete its <span class="mono">.conf</span> on the server.
+              Writes only the nginx server block — no Linux user, <span class="mono">public_html</span>, or DNS
+              zone. You own DNS, the document root, and TLS. It's listed here as a <strong>config-only</strong>
+              host (hidden from the SSL tab); remove it anytime with Delete on its row.
             </div>
 
             <div style=${{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -956,12 +956,12 @@
                   <div style=${{ flex: 1, minWidth: 0 }}>
                     <div class="li-name">${d.domain_name}</div>
                     <div class="li-sub">
-                      ${d.https_forced ? 'HTTPS' : 'HTTP'}${d.php_version ? ' · ' + d.php_version : ''}${d.proxy_pass ? ' · Proxy' : ''}
+                      ${d.https_forced ? 'HTTPS' : 'HTTP'}${d.php_version ? ' · ' + d.php_version : ''}${d.proxy_pass ? ' · Proxy' : ''}${d.vhost_only ? ' · Config-only' : ''}
                     </div>
                   </div>
-                  <span class=${'chip ' + (d.status === 'active' ? 'chip-green' : 'chip-gray')} style=${{ fontSize: 10 }}>
-                    ${d.status || 'active'}
-                  </span>
+                  ${d.vhost_only
+                    ? html`<span class="chip chip-accent" style=${{ fontSize: 10 }} title="nginx config only — no user/DNS, hidden from SSL">config</span>`
+                    : html`<span class=${'chip ' + (d.status === 'active' ? 'chip-green' : 'chip-gray')} style=${{ fontSize: 10 }}>${d.status || 'active'}</span>`}
                 </div>`)}
             </div>
           </div>

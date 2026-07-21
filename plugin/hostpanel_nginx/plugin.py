@@ -3,7 +3,7 @@ from hostpanel_nginx.redirects import router as redirects_router
 from hostpanel_nginx.settings import router as settings_router
 
 PLUGIN_MANIFEST = {
-    "requires_core": [1, 0, 0],
+    "requires_core": [1, 1, 2],
     "needs_provisioning": True,
     "nav_items": [
         {

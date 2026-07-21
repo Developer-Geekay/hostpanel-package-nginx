@@ -30,14 +30,19 @@ API prefixes: `/cpanelapi/domains/`, `/cpanelapi/redirects/`
 ### VHost-only creation
 
 The **+ VHost Only** button (and `POST /cpanelapi/domains/vhost-only`) writes *only* the nginx
-server block for a domain — **nothing else**: no tenant Linux user, no `public_html`, no DNS zone,
-and **no domain-registry record**. Not registering is deliberate — the SSL tab lists every
-registered domain, so a registered vhost-only host would show up as a phantom SSL entry. The
-operator supplies the `document_root` (static) or `proxy_pass` (proxy) and owns DNS, the document
-root, and TLS. The supplied root is validated (absolute path, safe characters) before it is written
-into nginx config. Because it isn't registered, the vhost doesn't appear in the Virtual Hosts or
-SSL lists; to remove it, delete its `.conf` under `/opt/hostpanel/nginx/vhosts/` and reload nginx.
-This is a separate path from **+ Add VHost** (full provisioning), which is unchanged.
+server block for a domain — no tenant Linux user, no `public_html`, and no DNS zone. The operator
+supplies the `document_root` (static) or `proxy_pass` (proxy) and owns DNS, the document root, and
+TLS. The supplied root is validated (absolute path, safe characters) before it is written into nginx
+config.
+
+The host is registered as **config-only** (`vhost_only=1` in the `domains` table), so it appears in
+the Virtual Hosts list (viewable/editable/deletable, shown with a `config` badge) — but the SSL tab
+**skips `vhost_only` domains**, so it never creates a phantom SSL entry (a config-only host has no
+DNS zone and can't get a DNS-01 cert). Re-submitting a domain whose `.conf` was created by an older,
+unregistered build adopts it into the registry. This is a separate path from **+ Add VHost** (full
+provisioning), which is unchanged.
+
+> Requires core ≥ 1.1.2 (the `domains.vhost_only` column and the SSL-list filter).
 
 ## Entry points
 

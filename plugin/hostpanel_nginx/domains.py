@@ -67,6 +67,7 @@ class DomainResponse(BaseModel):
     username: str
     document_root: str
     status: str
+    vhost_only: bool = False
 
 class DomainDetail(DomainResponse):
     https_forced: bool
@@ -819,23 +820,30 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
 
 @router.post("/vhost-only", response_model=DomainResponse)
 async def add_vhost_only(request: VhostOnlyCreateRequest, current_user: User = Depends(require_admin)):
-    """Write ONLY the nginx server block for a domain — nothing else. No tenant
-    user, no public_html, no DNS zone, and no domain-registry record. Not
-    registering is deliberate: the SSL tab lists every registered domain, so a
-    registered vhost-only host would show up as a phantom SSL entry. The operator
-    owns DNS, the document root, and TLS. add_domain is left untouched."""
+    """Write the nginx server block for a domain and register it as a config-only
+    host (vhost_only=1). No tenant user, no public_html, no DNS zone — the operator
+    owns those. It's listed in Virtual Hosts (viewable/editable/deletable), but the
+    SSL tab skips vhost_only domains, so it never creates a phantom SSL entry. A
+    plain .conf left over from an earlier (unregistered) create is adopted on
+    re-submit. add_domain (full provisioning) is left untouched."""
     domain = request.domain_name
+    username = _derive_username(domain)
 
     if domain in RESERVED_DOMAINS:
         raise HTTPException(status_code=400, detail=f"'{domain}' is a reserved domain.")
-    if any(d["domain_name"] == domain for d in _load_domains()):
+
+    existing = _load_domains()
+    if any(d["domain_name"] == domain for d in existing):
         raise HTTPException(status_code=409, detail=f"Domain '{domain}' is already managed by HostPanel.")
-    if os.path.exists(f"{VHOSTS_DIR}/{domain}.conf"):
-        raise HTTPException(status_code=409, detail=f"A vhost for '{domain}' already exists.")
 
     # Proxy vhosts serve no files (ACME webroot only); static vhosts use the
     # operator-supplied, injection-validated root.
     document_root = "/opt/hostpanel/acme" if request.proxy_pass else _validate_document_root(request.document_root)
+
+    record = {"domain_name": domain, "username": username,
+              "document_root": document_root, "status": "active", "vhost_only": 1}
+    existing.append(record)
+    _save_domains(existing)
 
     write_nginx_vhost(
         domain, document_root,
@@ -845,8 +853,9 @@ async def add_vhost_only(request: VhostOnlyCreateRequest, current_user: User = D
         gzip_enabled=request.gzip_enabled,
     )
 
-    log_action(current_user.username, "domain.add_vhost_only", domain, f"root={document_root}")
-    return {"domain_name": domain, "username": "", "document_root": document_root, "status": "active"}
+    log_action(current_user.username, "domain.add_vhost_only", domain,
+               f"user={username} root={document_root} vhost_only=1")
+    return {**record}
 
 
 @router.get("/{domain_name}", response_model=DomainDetail)
