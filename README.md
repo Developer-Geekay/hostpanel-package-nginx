@@ -42,6 +42,11 @@ DNS zone and can't get a DNS-01 cert). Re-submitting a domain whose `.conf` was 
 unregistered build adopts it into the registry. This is a separate path from **+ Add VHost** (full
 provisioning), which is unchanged.
 
+The **+ VHost Only** form has no HTTPS toggle (you own TLS — add a `listen 443 ssl` block in the
+raw config editor). Because the panel doesn't track TLS for these hosts, config-only rows show
+`Config-only` in the list (not `HTTP`/`HTTPS`) and `Managed in config` for HTTPS in the detail
+view, rather than a misleading `HTTP`/`Disabled`.
+
 > Requires core ≥ 1.1.2 (the `domains.vhost_only` column and the SSL-list filter).
 
 ## Entry points

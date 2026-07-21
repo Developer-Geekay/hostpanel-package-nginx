@@ -669,8 +669,8 @@
               </div>
               <div class="card" style=${{ padding: '10px 12px' }}>
                 <div class="form-label" style=${{ marginBottom: 3 }}>HTTPS</div>
-                <div style=${{ fontSize: 12.5, color: isHttps ? 'var(--ok)' : 'var(--text-3)' }}>
-                  ${domain.https_forced ? 'Enabled · forced' : domain.https_enabled ? 'Enabled' : 'Disabled'}
+                <div style=${{ fontSize: 12.5, color: domain.vhost_only ? 'var(--text-3)' : (isHttps ? 'var(--ok)' : 'var(--text-3)') }}>
+                  ${domain.vhost_only ? 'Managed in config' : (domain.https_forced ? 'Enabled · forced' : domain.https_enabled ? 'Enabled' : 'Disabled')}
                 </div>
               </div>
             </div>
@@ -701,10 +701,10 @@
               <div style=${{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 12 }}>SSL Certificate Status</div>
               <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
                 ${[
-                  ['HTTPS Enabled', domain.https_enabled ? 'Yes' : 'No'],
-                  ['HTTPS Forced', domain.https_forced ? 'Yes' : 'No'],
+                  ['HTTPS Enabled', domain.vhost_only ? 'Managed in config' : (domain.https_enabled ? 'Yes' : 'No')],
+                  ['HTTPS Forced', domain.vhost_only ? 'Managed in config' : (domain.https_forced ? 'Yes' : 'No')],
                   ['Domain', domain.domain_name],
-                  ['Status', domain.status || 'active'],
+                  ['Status', domain.vhost_only ? 'config-only' : (domain.status || 'active')],
                 ].map(([k, v]) => html`
                   <div key=${k} style=${{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                      <span style=${{ fontSize: 12, color: 'var(--text-3)' }}>${k}</span>
@@ -956,7 +956,7 @@
                   <div style=${{ flex: 1, minWidth: 0 }}>
                     <div class="li-name">${d.domain_name}</div>
                     <div class="li-sub">
-                      ${d.https_forced ? 'HTTPS' : 'HTTP'}${d.php_version ? ' · ' + d.php_version : ''}${d.proxy_pass ? ' · Proxy' : ''}${d.vhost_only ? ' · Config-only' : ''}
+                      ${d.vhost_only ? 'Config-only' : (d.https_forced ? 'HTTPS' : 'HTTP')}${d.php_version ? ' · ' + d.php_version : ''}${d.proxy_pass ? ' · Proxy' : ''}
                     </div>
                   </div>
                   ${d.vhost_only
