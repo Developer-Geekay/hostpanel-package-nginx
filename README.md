@@ -29,13 +29,15 @@ API prefixes: `/cpanelapi/domains/`, `/cpanelapi/redirects/`
 
 ### VHost-only creation
 
-The **+ VHost Only** button (and `POST /cpanelapi/domains/vhost-only`) registers a domain
-and writes *only* its nginx server block — no tenant Linux user, no `public_html`, and no
-DNS zone. The operator supplies the `document_root` (static) or `proxy_pass` (proxy) and maps
-DNS + creates the directory themselves; the operator-supplied root is validated (absolute path,
-safe characters) before it is written into nginx config. The domain still lists, edits, and
-deletes like any other. This is a separate path from **+ Add VHost** (full provisioning), which
-is unchanged.
+The **+ VHost Only** button (and `POST /cpanelapi/domains/vhost-only`) writes *only* the nginx
+server block for a domain — **nothing else**: no tenant Linux user, no `public_html`, no DNS zone,
+and **no domain-registry record**. Not registering is deliberate — the SSL tab lists every
+registered domain, so a registered vhost-only host would show up as a phantom SSL entry. The
+operator supplies the `document_root` (static) or `proxy_pass` (proxy) and owns DNS, the document
+root, and TLS. The supplied root is validated (absolute path, safe characters) before it is written
+into nginx config. Because it isn't registered, the vhost doesn't appear in the Virtual Hosts or
+SSL lists; to remove it, delete its `.conf` under `/opt/hostpanel/nginx/vhosts/` and reload nginx.
+This is a separate path from **+ Add VHost** (full provisioning), which is unchanged.
 
 ## Entry points
 

@@ -46,6 +46,7 @@
   function VhostConfigEditor({ domain, onSaved }) {
     const { ok, err: toastErr } = useToast();
     const [content, setContent] = useState('');
+    const [path, setPath] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [resetting, setResetting] = useState(false);
@@ -56,7 +57,7 @@
       if (!domain) return;
       setLoading(true);
       sdk.fetch('GET', '/cpanelapi/domains/' + domain + '/vhost')
-        .then(d => { setContent(d.content || ''); setLoading(false); })
+        .then(d => { setContent(d.content || ''); setPath(d.path || ''); setLoading(false); })
         .catch(e => { setError(e.message || 'Failed to load vhost'); setLoading(false); });
     }, [domain]);
 
@@ -92,10 +93,9 @@
     return html`
       <div class="animate-fade-in" style=${{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <select style=${{ height: 32, fontSize: 12, flex: 1, maxWidth: 360, background: 'var(--bg-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', padding: '0 8px' }}>
-            <option>/etc/nginx/sites-enabled/${domain}</option>
-            <option>/etc/nginx/sites-available/${domain}</option>
-          </select>
+          <div class="mono" title=${path} style=${{ height: 32, display: 'flex', alignItems: 'center', fontSize: 12, flex: 1, maxWidth: 360, background: 'var(--bg-3)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-2)', padding: '0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            ${path || '—'}
+          </div>
           <button class="btn btn-primary btn-sm" onClick=${save} disabled=${saving || loading}>
             <${SaveIcon} /> ${saving ? 'Saving…' : 'Save & Reload'}
           </button>
@@ -300,13 +300,13 @@
   // ── VHost-only inline form (writes just the nginx block; no user/DNS/folders) ─
 
   function AddVhostOnlyForm({ onCancel, onCreated }) {
+    const { ok } = useToast();
     const [formDomain, setFormDomain] = useState('');
     const [formAliases, setFormAliases] = useState('');
     const [formRoot, setFormRoot] = useState('/var/www/');
     const [formPhp, setFormPhp] = useState('');
     const [formProxy, setFormProxy] = useState('');
     const [formBackendType, setFormBackendType] = useState('static');
-    const [formForceHttps, setFormForceHttps] = useState(false);
     const [formGzip, setFormGzip] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -324,9 +324,9 @@
           document_root: formRoot.trim(),
           php_version: formBackendType === 'static' ? formPhp : '',
           proxy_pass: formBackendType === 'proxy' ? formProxy.trim() : '',
-          https_forced: formForceHttps,
           gzip_enabled: formGzip,
         });
+        ok('VHost config written (not tracked as a managed domain)');
         onCreated();
       } catch (e) {
         setError(e.message || 'Failed to create vhost');
@@ -354,8 +354,9 @@
           <form onSubmit=${submit}>
 
             <div style=${{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18, padding: '10px 12px', background: 'var(--bg-3)', border: '1px solid var(--border)', borderRadius: 8 }}>
-              Writes only the nginx server block. No Linux user, <span class="mono">public_html</span>, or DNS
-              zone is created — point DNS at the server and create the document root yourself.
+              Writes only the nginx server block. No Linux user, <span class="mono">public_html</span>, DNS zone,
+              or domain record is created — so it won't appear in the Virtual Hosts or SSL lists. You own DNS,
+              the document root, and TLS. To remove it, delete its <span class="mono">.conf</span> on the server.
             </div>
 
             <div style=${{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -420,14 +421,7 @@
               Options<div style=${{ flex: 1, height: 1, background: 'var(--border)' }}></div>
             </div>
 
-            <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-              <label style=${checkStyle(formForceHttps)}>
-                <input type="checkbox" checked=${formForceHttps} onChange=${e => setFormForceHttps(e.target.checked)} style=${{ accentColor: 'var(--accent)', width: 14, height: 14 }} />
-                <div>
-                  <div style=${{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>Force HTTPS</div>
-                  <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>Needs a cert you install</div>
-                </div>
-              </label>
+            <div style=${{ marginBottom: 14 }}>
               <label style=${checkStyle(formGzip)}>
                 <input type="checkbox" checked=${formGzip} onChange=${e => setFormGzip(e.target.checked)} style=${{ accentColor: 'var(--accent)', width: 14, height: 14 }} />
                 <div>

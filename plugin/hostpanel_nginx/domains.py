@@ -49,7 +49,6 @@ class VhostOnlyCreateRequest(BaseModel):
     proxy_pass: str = ""
     php_version: str = ""
     gzip_enabled: bool = False
-    https_forced: bool = False
 
 class SubdomainCreateRequest(BaseModel):
     subdomain: str
@@ -820,38 +819,34 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
 
 @router.post("/vhost-only", response_model=DomainResponse)
 async def add_vhost_only(request: VhostOnlyCreateRequest, current_user: User = Depends(require_admin)):
-    """Register a domain and write ONLY its nginx server block. Creates no tenant
-    user, no public_html, and no DNS zone — the operator maps DNS and creates the
-    document root themselves. The domain still lists/edits/deletes like any other.
-    Independent of add_domain; the full-provisioning flow is left untouched."""
+    """Write ONLY the nginx server block for a domain — nothing else. No tenant
+    user, no public_html, no DNS zone, and no domain-registry record. Not
+    registering is deliberate: the SSL tab lists every registered domain, so a
+    registered vhost-only host would show up as a phantom SSL entry. The operator
+    owns DNS, the document root, and TLS. add_domain is left untouched."""
     domain = request.domain_name
-    username = _derive_username(domain)
 
-    existing = _load_domains()
-    if any(d["domain_name"] == domain for d in existing):
-        raise HTTPException(status_code=409, detail=f"Domain '{domain}' is already provisioned.")
     if domain in RESERVED_DOMAINS:
         raise HTTPException(status_code=400, detail=f"'{domain}' is a reserved domain.")
+    if any(d["domain_name"] == domain for d in _load_domains()):
+        raise HTTPException(status_code=409, detail=f"Domain '{domain}' is already managed by HostPanel.")
+    if os.path.exists(f"{VHOSTS_DIR}/{domain}.conf"):
+        raise HTTPException(status_code=409, detail=f"A vhost for '{domain}' already exists.")
 
     # Proxy vhosts serve no files (ACME webroot only); static vhosts use the
     # operator-supplied, injection-validated root.
     document_root = "/opt/hostpanel/acme" if request.proxy_pass else _validate_document_root(request.document_root)
 
-    record = {"domain_name": domain, "username": username, "document_root": document_root, "status": "active"}
-    existing.append(record)
-    _save_domains(existing)
-
     write_nginx_vhost(
         domain, document_root,
-        https_forced=request.https_forced,
         aliases=request.aliases,
         proxy_pass=request.proxy_pass,
         php_version=request.php_version,
         gzip_enabled=request.gzip_enabled,
     )
 
-    log_action(current_user.username, "domain.add_vhost_only", domain, f"user={username} root={document_root}")
-    return record
+    log_action(current_user.username, "domain.add_vhost_only", domain, f"root={document_root}")
+    return {"domain_name": domain, "username": "", "document_root": document_root, "status": "active"}
 
 
 @router.get("/{domain_name}", response_model=DomainDetail)
