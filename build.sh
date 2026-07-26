@@ -3,7 +3,7 @@
 # Uses Python's zipfile so paths always use forward slashes regardless of OS.
 set -euo pipefail
 
-VERSION=$(python3 -c "import re; print(re.search(r'version=[\"\'']([^\"\']+)[\"\'']', open('plugin/setup.py').read()).group(1))")
+VERSION=$(python3 -c "import re; print(re.search(r'version=\"([^\"]+)\"', open('plugin/setup.py').read()).group(1))")
 OUT="hostpanel-nginx-${VERSION}.zip"
 
 echo "Building ${OUT}..."

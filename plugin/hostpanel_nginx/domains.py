@@ -155,7 +155,15 @@ def _validate_document_root(root: str) -> str:
 
 
 def _derive_username(domain: str) -> str:
-    label = domain.split(".")[0]
+    domain_val = (domain or "").lower().strip()
+    parts = [p for p in domain_val.split(".") if p]
+    if len(parts) >= 2:
+        label = parts[-2]
+    elif len(parts) == 1:
+        label = parts[0]
+    else:
+        label = "web"
+
     safe = re.sub(r"[^a-z0-9_]", "", label.lower())[:32] or "web"
     return safe
 
