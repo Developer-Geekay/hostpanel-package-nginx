@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="hostpanel-nginx",
-    version="1.2.4",
+    version="1.2.5",
     packages=find_packages(),
     install_requires=["fastapi", "pydantic", "httpx"],
     entry_points={

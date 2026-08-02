@@ -767,6 +767,26 @@ async def list_domains(current_user: User = Depends(get_current_user)):
     domains = _load_domains()
     if current_user.role != "admin":
         domains = [d for d in domains if d.get("username") == current_user.linux_user]
+
+    # Auto-heal legacy /opt/hostpanel/acme document_roots in SQLite
+    healed = False
+    for d in domains:
+        if d.get("document_root") == "/opt/hostpanel/acme":
+            u = d.get("username") or _derive_username(d["domain_name"])
+            d["document_root"] = f"/home/{u}/public_html/{d['domain_name']}" if d.get("vhost_only") else f"/home/{u}/public_html"
+            healed = True
+
+    if healed:
+        try:
+            all_domains = _load_domains()
+            for ad in all_domains:
+                if ad.get("document_root") == "/opt/hostpanel/acme":
+                    u = ad.get("username") or _derive_username(ad["domain_name"])
+                    ad["document_root"] = f"/home/{u}/public_html/{ad['domain_name']}" if ad.get("vhost_only") else f"/home/{u}/public_html"
+            _save_domains(all_domains)
+        except Exception:
+            pass
+
     return [{**d, "https_forced": _is_https_forced(d["domain_name"])} for d in domains]
 
 
@@ -774,9 +794,11 @@ async def list_domains(current_user: User = Depends(get_current_user)):
 async def add_domain(request: DomainCreateRequest, current_user: User = Depends(require_admin)):
     domain = request.domain_name
     username = _derive_username(domain)
-    # Static sites are served from the tenant's own home; proxy vhosts serve no
-    # files, so they only need an ACME webroot for certbot challenges.
-    document_root = "/opt/hostpanel/acme" if request.proxy_pass else f"/home/{username}/public_html"
+    document_root = (request.document_root or "").strip()
+    if document_root and document_root != "/opt/hostpanel/acme":
+        document_root = _validate_document_root(document_root)
+    else:
+        document_root = f"/home/{username}/public_html"
 
     existing = _load_domains()
     if any(d["domain_name"] == domain for d in existing):
@@ -812,10 +834,9 @@ async def add_domain(request: DomainCreateRequest, current_user: User = Depends(
 
     if request.https_enabled and shutil.which("certbot"):
         certbot_email = os.environ.get("CERTBOT_EMAIL", "admin@hostpanel.local")
-        acme_root = document_root if not request.proxy_pass else "/opt/hostpanel/acme"
         cmd = [
             "sudo", "certbot", "certonly", "--webroot",
-            "-w", acme_root,
+            "-w", "/opt/hostpanel/acme",
             "-d", domain,
             "--non-interactive", "--agree-tos", "--email", certbot_email,
             "--keep-until-expiring",
@@ -844,9 +865,11 @@ async def add_vhost_only(request: VhostOnlyCreateRequest, current_user: User = D
     if any(d["domain_name"] == domain for d in existing):
         raise HTTPException(status_code=409, detail=f"Domain '{domain}' is already managed by HostPanel.")
 
-    # Proxy vhosts serve no files (ACME webroot only); static vhosts use the
-    # operator-supplied, injection-validated root.
-    document_root = "/opt/hostpanel/acme" if request.proxy_pass else _validate_document_root(request.document_root)
+    specified_root = (request.document_root or "").strip()
+    if specified_root and specified_root != "/opt/hostpanel/acme":
+        document_root = _validate_document_root(specified_root)
+    else:
+        document_root = f"/home/{username}/public_html/{domain}"
 
     record = {"domain_name": domain, "username": username,
               "document_root": document_root, "status": "active", "vhost_only": 1}
